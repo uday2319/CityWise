@@ -1,0 +1,64 @@
+@import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;700&family=DM+Sans:wght@300;400;500;600&display=swap');
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --color-primary: #f97316;
+  --color-secondary: #14b8a6;
+  --color-dark: #0f172a;
+}
+
+body {
+  font-family: 'DM Sans', sans-serif;
+  background: #0f172a;
+  color: #f1f5f9;
+}
+
+.gradient-hero {
+  background: linear-gradient(135deg, #0f172a 0%, #1e293b 50%, #0f172a 100%);
+}
+
+.card {
+  background: rgba(30, 41, 59, 0.8);
+  border: 1px solid rgba(148, 163, 184, 0.1);
+  backdrop-filter: blur(10px);
+}
+
+.btn-primary {
+  background: linear-gradient(135deg, #f97316, #ea580c);
+  color: white;
+  font-weight: 600;
+  transition: all 0.2s;
+}
+
+.btn-primary:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 10px 25px rgba(249, 115, 22, 0.3);
+}
+
+.interest-tag {
+  border: 1px solid rgba(249, 115, 22, 0.3);
+  transition: all 0.15s;
+  cursor: pointer;
+}
+
+.interest-tag.selected {
+  background: rgba(249, 115, 22, 0.2);
+  border-color: #f97316;
+  color: #f97316;
+}
+
+.timeline-dot {
+  width: 12px;
+  height: 12px;
+  background: #f97316;
+  border-radius: 50%;
+  border: 2px solid #0f172a;
+  box-shadow: 0 0 0 3px rgba(249, 115, 22, 0.3);
+}
+
+.timeline-line {
+  width: 2px;
+  background: linear-gradient(180deg, #f97316, #14b8a6);
+}
