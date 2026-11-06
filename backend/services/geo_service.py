@@ -13,8 +13,9 @@ import httpx
 from typing import Optional
 from geopy.geocoders import Nominatim
 from geopy.distance import geodesic
+from backend.core.config import settings
 
-GEOAPIFY_API_KEY = os.getenv("GEOAPIFY_API_KEY", "")
+GEOAPIFY_API_KEY = settings.GEOAPIFY_API_KEY or ""
 
 ATTRACTION_CATEGORIES = [
     "tourism.sights",
@@ -81,38 +82,41 @@ def _geocode_city(city: str) -> Optional[tuple[float, float]]:
         print(f"  [GeoService] Geocoding failed for '{city}': {exc}")
     return None
 
-
 def _map_category(raw_cats: list[str]) -> str:
     for cat in raw_cats:
         for key, label in _CATEGORY_MAP.items():
-            if key in cat:
+            if cat == key or cat.startswith(key + "."):
                 return label
+
     return "Attraction"
 
 
 # ── Geoapify fetch ─────────────────────────────────────────────────────────
-
 def _fetch_raw(city_lat: float, city_lon: float, limit: int) -> list[dict]:
-    cats = ",".join(ATTRACTION_CATEGORIES)
-    url  = (
-        "https://api.geoapify.com/v2/places"
-        f"?categories={cats}"
-        f"&filter=circle:{city_lon},{city_lat},{SEARCH_RADIUS_M}"
-        f"&bias=proximity:{city_lon},{city_lat}"
-        f"&limit={limit}"
-        f"&apiKey={GEOAPIFY_API_KEY}"
-    )
+    url = "https://api.geoapify.com/v2/places"
+
+    params = {
+        "categories": ",".join(ATTRACTION_CATEGORIES),
+        "filter": f"circle:{city_lon},{city_lat},{SEARCH_RADIUS_M}",
+        "bias": f"proximity:{city_lon},{city_lat}",
+        "limit": limit,
+        "apiKey": GEOAPIFY_API_KEY,
+    }
+
     try:
-        with httpx.Client(timeout=15) as client:
-            resp = client.get(url)
+        with httpx.Client(timeout=20) as client:
+            resp = client.get(url, params=params)
             resp.raise_for_status()
             return resp.json().get("features", [])
+
     except httpx.HTTPStatusError as exc:
         print(f"  [GeoService] HTTP {exc.response.status_code} from Geoapify")
-    except Exception as exc:
+    except httpx.RequestError as exc:
         print(f"  [GeoService] Request error: {exc}")
-    return []
+    except Exception as exc:
+        print(f"  [GeoService] Unexpected error: {exc}")
 
+    return []
 
 def _parse(
     feature: dict,

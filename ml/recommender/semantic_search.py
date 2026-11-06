@@ -42,23 +42,41 @@ class AttractionRecommender:
         self.index = None
         self.attractions_df: Optional[pd.DataFrame] = None
         self._loaded = False
+        self._model_loaded = False
+
+    def load_model(self):
+        """Load only Sentence-BERT without static FAISS or CSV files."""
+        if self._model_loaded:
+            return
+
+        print("Loading Sentence-BERT model...")
+        self.model = SentenceTransformer(SBERT_MODEL)
+        self._model_loaded = True
+
+        print("Sentence-BERT model loaded successfully.")
 
     def load(self):
         if self._loaded:
             return
 
         print("Loading AttractionRecommender...")
-        self.model = SentenceTransformer(SBERT_MODEL)
+
+    # Load Sentence-BERT
+        self.load_model()
+
+    # Load static FAISS and CSV data
         self.index = load_index("attraction_index")
+
         self.attractions_df = pd.read_csv(
-            os.path.join(PROCESSED_DIR, "attractions_featured.csv")
-        )
+        os.path.join(PROCESSED_DIR, "attractions_featured.csv")
+    )
 
         self.attractions_df["city_clean"] = (
-            self.attractions_df["city"].astype(str).str.lower().str.strip()
-        )
+        self.attractions_df["city"].astype(str).str.lower().str.strip()
+    )
 
         self._loaded = True
+
         print(f"Loaded {len(self.attractions_df)} attractions")
 
     def _encode_user_preference(self, preference_text: str, city: str) -> np.ndarray:
@@ -213,9 +231,9 @@ class AttractionRecommender:
 
         Returns:
             Filtered, scored DataFrame ready for XGBRanker.rerank().
-        """
-        if not self._loaded:
-            self.load()
+        """ 
+        if not self._model_loaded:
+            self.load_model()
 
         if df.empty:
             return pd.DataFrame()

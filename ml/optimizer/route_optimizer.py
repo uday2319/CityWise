@@ -63,10 +63,15 @@ def solve_tsp(
 
     # If most locations are missing coordinates, return original order
     valid_coords = sum(
-        1 for lat, lon in locations
-        if lat is not None and lon is not None
-        and not (math.isnan(float(lat)) if lat is not None else True)
-    )
+    1 for lat, lon in locations
+    if lat is not None
+    and lon is not None
+    and math.isfinite(float(lat))
+    and math.isfinite(float(lon))
+    and -90 <= float(lat) <= 90
+    and -180 <= float(lon) <= 180
+    and (float(lat), float(lon)) != (0.0, 0.0)
+)
     if valid_coords < n // 2:
         print("  Most coordinates missing — skipping route optimization")
         return list(range(n))
@@ -116,6 +121,7 @@ def solve_tsp(
 
     return route
 
+import pandas as pd
 
 def optimize_day_route(day_attractions: list[dict]) -> list[dict]:
     """
@@ -131,9 +137,12 @@ def optimize_day_route(day_attractions: list[dict]) -> list[dict]:
         return day_attractions
 
     locations = [
-        (float(a.get("latitude") or 0), float(a.get("longitude") or 0))
-        for a in day_attractions
-    ]
+    (
+        float(a["latitude"]) if pd.notna(a.get("latitude")) else None,
+        float(a["longitude"]) if pd.notna(a.get("longitude")) else None,
+    )
+    for a in day_attractions
+]
     names = [a.get("name", f"Stop {i}") for i, a in enumerate(day_attractions)]
 
     optimal_order = solve_tsp(locations, names)
