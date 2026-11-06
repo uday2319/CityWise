@@ -3,14 +3,14 @@
 import os
 import pandas as pd
 from typing import Optional
-
+from backend.core.config import settings
 from ml.recommender.semantic_search import AttractionRecommender
 from ml.ranking.train_ranker import AttractionRanker
 from ml.scheduler.day_scheduler import DayScheduler
 
 # Set USE_GEOAPIFY=true in .env to use live Geoapify data.
 # Set USE_GEOAPIFY=false to fall back to the original SBERT+FAISS CSV path.
-USE_GEOAPIFY: bool = os.getenv("USE_GEOAPIFY", "true").lower() == "true"
+#USE_GEOAPIFY: bool = os.getenv("USE_GEOAPIFY", "true").lower() == "true"
 
 
 class MLService:
@@ -22,14 +22,19 @@ class MLService:
         self.restaurants_df: Optional[pd.DataFrame] = None
 
     async def load_all(self):
-        print("  Loading SBERT + FAISS recommender...")
-        self.recommender.load()
-
+        if settings.USE_GEOAPIFY:
+            print("  Loading Sentence-BERT for Geoapify dynamic FAISS...")
+            self.recommender.load_model()
+        else:
+                print("  Loading SBERT + static FAISS recommender...")
+                self.recommender.load()
+        
         print("  Loading XGBRanker...")
         self.ranker.load()
-
+        
         print("  Loading restaurants data...")
         rest_path = "data/processed/restaurants_featured.csv"
+        
         if os.path.exists(rest_path):
             self.restaurants_df = pd.read_csv(rest_path)
             print(f"  Loaded {len(self.restaurants_df)} restaurants")
@@ -37,8 +42,7 @@ class MLService:
             print("  Warning: restaurants_featured.csv not found")
             self.restaurants_df = None
 
-    # ── Private: Geoapify → SBERT → dynamic FAISS path ────────────────────
-
+ 
     def _candidates_from_geoapify(
         self,
         city: str,
@@ -110,12 +114,16 @@ class MLService:
         else:
             effective_budget = budget_per_day_inr
 
-        source = "geoapify+dynamic_faiss" if USE_GEOAPIFY else "csv+static_faiss"
+        source = (
+    "geoapify+dynamic_faiss"
+    if settings.USE_GEOAPIFY
+    else "csv+static_faiss"
+)
         print(f"\n[MLService] city={city} | days={duration_days} | "
               f"₹{effective_budget:.0f}/day | source={source}")
 
         # ── Step 1: Obtain candidates ──────────────────────────────────────
-        if USE_GEOAPIFY:
+        if settings.USE_GEOAPIFY:
             candidates = self._candidates_from_geoapify(
                 city, preference_text, effective_budget, duration_days
             )
