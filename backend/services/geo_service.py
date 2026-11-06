@@ -76,6 +76,13 @@ _NOT_AN_ATTRACTION = re.compile(
     re.IGNORECASE,
 )
 
+# East Asian names on places in India are mislabelled map entries.
+_EAST_ASIAN_TEXT = re.compile(r"[぀-ヿ一-鿿가-힯]")
+
+# Two entries closer than this are the same place under different names,
+# such as "Hawa Mahal" and "Wind Palace".
+SAME_PLACE_KM = 0.15
+
 # Successful geocodes only, so a transient failure is retried next request.
 _geocode_cache: dict[str, tuple[float, float]] = {}
 
@@ -99,16 +106,59 @@ def _geocode_city(city: str) -> Optional[tuple[float, float]]:
     cache_key = city.lower().strip()
     if cache_key in _geocode_cache:
         return _geocode_cache[cache_key]
+    # "Kyoto, Japan" already names a country; a bare city means India.
+    query = city if "," in city else f"{city}, India"
     try:
         geo      = Nominatim(user_agent="itinera_geo", timeout=5)
-        location = geo.geocode(f"{city}, India")
+        location = geo.geocode(query)
         if location:
             centre = (float(location.latitude), float(location.longitude))
             _geocode_cache[cache_key] = centre
             return centre
     except Exception as exc:
         print(f"  [GeoService] Geocoding failed for '{city}': {exc}")
+
+    centre = _geocode_with_geoapify(query)
+    if centre:
+        _geocode_cache[cache_key] = centre
+    return centre
+
+
+def _geocode_with_geoapify(query: str) -> Optional[tuple[float, float]]:
+    """Backup for when Nominatim is unreachable or finds nothing."""
+    if not GEOAPIFY_API_KEY:
+        return None
+    try:
+        with httpx.Client(timeout=10) as client:
+            response = client.get(
+                "https://api.geoapify.com/v1/geocode/search",
+                params={"text": query, "type": "city", "limit": 1,
+                        "format": "json", "apiKey": GEOAPIFY_API_KEY},
+            )
+            response.raise_for_status()
+            results = response.json().get("results", [])
+    except (httpx.HTTPError, ValueError) as exc:
+        print(f"  [GeoService] Backup geocoding failed: {type(exc).__name__}")
+        return None
+
+    # Unknown names otherwise come back as a loose match at low confidence.
+    if results and results[0].get("rank", {}).get("confidence", 0) >= 0.5:
+        return float(results[0]["lat"]), float(results[0]["lon"])
     return None
+
+def _is_listed(place: dict, places: list[dict]) -> bool:
+    """True when an entry already in the list stands at the same spot."""
+    here = (place["latitude"], place["longitude"])
+    return any(
+        geodesic(here, (other["latitude"], other["longitude"])).km < SAME_PLACE_KM
+        for other in places
+    )
+
+
+def _display_name(props: dict) -> str:
+    """The English name when the map data has one, else the local name."""
+    return (props.get("name_international") or {}).get("en") or props.get("name") or ""
+
 
 def _map_category(raw_cats: list[str]) -> str:
     for cat in raw_cats:
@@ -174,7 +224,7 @@ def _parse(
         return None
 
     name = (
-        props.get("name")
+        _display_name(props)
         or props.get("address_line1")
         or props.get("formatted", "").split(",")[0]
     ).strip()
@@ -183,6 +233,9 @@ def _parse(
         return None
 
     if _NOT_AN_ATTRACTION.search(name):
+        return None
+
+    if "," not in city_name and _EAST_ASIAN_TEXT.search(name):
         return None
 
     category      = _map_category(props.get("categories", []))
@@ -210,6 +263,7 @@ def _parse(
         "budget_fit_score":     1.0,
         # rating and entrance_fee above are defaults, not real data.
         "placeholder_metrics":  True,
+        "opening_hours":        props.get("opening_hours"),
     }
 
 
@@ -244,7 +298,7 @@ def get_places(city: str, user_input: str = "") -> list[dict]:
         if parsed is None:
             continue
         key = parsed["attraction_name"].lower().strip()
-        if key in seen:
+        if key in seen or _is_listed(parsed, places):
             continue
         seen.add(key)
         places.append(parsed)
@@ -298,6 +352,38 @@ def search_places(city: str, interest: Optional[str] = None, limit: int = 60) ->
     return places[:limit]
 
 
+def get_hotels(city: str, limit: int = 60) -> list[dict]:
+    """Real hotels near the city centre. Geoapify has no prices or ratings."""
+    if not GEOAPIFY_API_KEY:
+        raise EnvironmentError("GEOAPIFY_API_KEY is not set.")
+
+    centre = _geocode_city(city)
+    if centre is None:
+        return []
+    city_lat, city_lon = centre
+
+    raw = _fetch_raw(city_lat, city_lon, limit=limit, categories=["accommodation.hotel"])
+
+    hotels: list[dict] = []
+    for feature in raw:
+        props = feature.get("properties", {})
+        coords = feature.get("geometry", {}).get("coordinates", [])
+        name = _display_name(props).strip()
+        if len(name) < 3 or len(coords) < 2 or not _is_valid_coord(coords[1], coords[0]):
+            continue
+        hotels.append({
+            "name":      name,
+            "area":      props.get("suburb") or props.get("district"),
+            "address":   props.get("formatted"),
+            "stars":     (props.get("accommodation") or {}).get("stars"),
+            "website":   props.get("website"),
+            "latitude":  float(coords[1]),
+            "longitude": float(coords[0]),
+        })
+    print(f"  [GeoService] Hotels for '{city}': {len(hotels)}")
+    return hotels
+
+
 def get_restaurants(city: str, limit: int = 100) -> list[dict]:
     """
     Real restaurants near the city centre, used when the CSV has none.
@@ -319,7 +405,7 @@ def get_restaurants(city: str, limit: int = 100) -> list[dict]:
     for feature in raw:
         props = feature.get("properties", {})
         coords = feature.get("geometry", {}).get("coordinates", [])
-        name = (props.get("name") or "").strip()
+        name = _display_name(props).strip()
         if len(name) < 3 or len(coords) < 2:
             continue
         lon, lat = coords[0], coords[1]

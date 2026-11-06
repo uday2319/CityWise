@@ -40,8 +40,8 @@ async def current_weather(
         "longitude": lon,
         "current": "temperature_2m,apparent_temperature,relative_humidity_2m,"
                    "weather_code,wind_speed_10m",
-        "daily": "temperature_2m_max,temperature_2m_min",
-        "forecast_days": 1,
+        "daily": "temperature_2m_max,temperature_2m_min,weather_code",
+        "forecast_days": 3,
         "timezone": "auto",
     }
 
@@ -60,6 +60,20 @@ async def current_weather(
             "weather_code": current["weather_code"],
             "high_c": daily["temperature_2m_max"][0],
             "low_c": daily["temperature_2m_min"][0],
+            "forecast": [
+                {
+                    "date": date,
+                    "high_c": high,
+                    "low_c": low,
+                    "condition": _CONDITIONS.get(code, "Unknown"),
+                }
+                for date, high, low, code in zip(
+                    daily["time"],
+                    daily["temperature_2m_max"],
+                    daily["temperature_2m_min"],
+                    daily["weather_code"],
+                )
+            ],
         }
     except (httpx.HTTPError, KeyError, IndexError, ValueError) as exc:
         print(f"  [Weather] Lookup failed: {exc}")

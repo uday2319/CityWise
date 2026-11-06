@@ -4,40 +4,22 @@ import { toast } from 'react-hot-toast';
 import { Heart, Info, X } from 'lucide-react';
 import CityInput from '../components/CityInput';
 import { useProfile } from '../context/ProfileContext';
-import { useTrips } from '../context/TripContext';
-import { LANGUAGES } from '../lib/languages';
 
 export default function Profile() {
-  const { profile, updateProfile, toggleDestination, resetProfile } = useProfile();
-  const { clearAll, savedTrips } = useTrips();
+  const { profile, updateProfile, toggleDestination } = useProfile();
 
   const [name, setName] = useState(profile.name);
   const [homeCity, setHomeCity] = useState(profile.homeCity);
   const [travelStyle, setTravelStyle] = useState(profile.travelStyle);
-  const [sourceLanguage, setSourceLanguage] = useState(profile.sourceLanguage);
-  const [targetLanguage, setTargetLanguage] = useState(profile.targetLanguage);
-  const [confirmClear, setConfirmClear] = useState(false);
 
   const submit = (event: FormEvent) => {
     event.preventDefault();
-    updateProfile({ name: name.trim(), homeCity: homeCity.trim(), travelStyle: travelStyle.trim(), sourceLanguage, targetLanguage });
+    updateProfile({ name: name.trim(), homeCity: homeCity.trim(), travelStyle: travelStyle.trim() });
     toast.success('Profile saved');
   };
 
-  const clearEverything = () => {
-    clearAll();
-    resetProfile();
-    setName('');
-    setHomeCity('');
-    setTravelStyle('');
-    setSourceLanguage('en');
-    setTargetLanguage('hi');
-    setConfirmClear(false);
-    toast.success('All CityWise data cleared from this device');
-  };
-
   return (
-    <div className="mx-auto max-w-3xl px-4 py-8 sm:px-6">
+    <div className="mx-auto max-w-3xl px-4 py-6 sm:px-5">
       <h1 className="text-3xl font-extrabold">Profile</h1>
       <p className="mt-2 flex items-start gap-2 text-sm text-ink-soft">
         <Info size={15} className="mt-0.5 flex-shrink-0" />
@@ -80,21 +62,6 @@ export default function Profile() {
           <p className="mt-1 text-xs text-ink-soft">Filled in for you on the trip planner.</p>
         </div>
 
-        <div className="grid gap-4 sm:grid-cols-2">
-          <div>
-            <label htmlFor="profile-source" className="label">I speak</label>
-            <select id="profile-source" className="input" value={sourceLanguage} onChange={e => setSourceLanguage(e.target.value)}>
-              {LANGUAGES.map(l => <option key={l.code} value={l.code}>{l.name}</option>)}
-            </select>
-          </div>
-          <div>
-            <label htmlFor="profile-target" className="label">Usually translate to</label>
-            <select id="profile-target" className="input" value={targetLanguage} onChange={e => setTargetLanguage(e.target.value)}>
-              {LANGUAGES.map(l => <option key={l.code} value={l.code}>{l.name}</option>)}
-            </select>
-          </div>
-        </div>
-
         <button type="submit" className="btn-primary">Save profile</button>
       </form>
 
@@ -108,7 +75,7 @@ export default function Profile() {
           <ul className="mt-3 flex flex-wrap gap-2">
             {profile.savedDestinations.map(city => (
               <li key={city} className="chip pr-1.5">
-                <Link to={`/explore?city=${encodeURIComponent(city)}`} className="hover:underline">
+                <Link to={`/discover?view=${encodeURIComponent(city)}`} className="hover:underline">
                   {city}
                 </Link>
                 <button
@@ -122,25 +89,6 @@ export default function Profile() {
               </li>
             ))}
           </ul>
-        )}
-      </section>
-
-      <section className="card mt-5 p-5 sm:p-6">
-        <h2 className="text-lg font-bold">Account settings</h2>
-        <p className="mt-1 text-sm text-ink-soft">
-          Remove your profile and {savedTrips.length}{' '}
-          {savedTrips.length === 1 ? 'saved trip' : 'saved trips'} from this device. This can’t be undone.
-        </p>
-        {confirmClear ? (
-          <div className="mt-3 flex flex-wrap items-center gap-2">
-            <span className="text-sm font-semibold">Clear everything?</span>
-            <button type="button" onClick={clearEverything} className="btn-danger">Clear data</button>
-            <button type="button" onClick={() => setConfirmClear(false)} className="btn-secondary">Cancel</button>
-          </div>
-        ) : (
-          <button type="button" onClick={() => setConfirmClear(true)} className="btn-secondary mt-3">
-            Clear my data
-          </button>
         )}
       </section>
     </div>

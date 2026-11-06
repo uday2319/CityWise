@@ -47,7 +47,11 @@ export function useSpeechRecognition() {
 
   useEffect(() => () => active.current?.abort(), []);
 
-  const start = useCallback((lang: string, onResult: (text: string) => void) => {
+  const start = useCallback((
+    lang: string,
+    onResult: (text: string) => void,
+    onNothing?: () => void
+  ) => {
     const Constructor = recognitionConstructor();
     if (!Constructor) return;
 
@@ -70,8 +74,8 @@ export function useSpeechRecognition() {
     };
 
     recognition.onerror = event => {
-      if (event.error === 'aborted') return;
       failed = true;
+      if (event.error === 'aborted') return;
       setError(
         RECOGNITION_ERRORS[event.error] ?? 'Speech recognition failed. You can type instead.'
       );
@@ -82,7 +86,10 @@ export function useSpeechRecognition() {
       setTranscript('');
       active.current = null;
       if (heard && !failed) onResult(heard);
-      else if (!failed) setError(RECOGNITION_ERRORS['no-speech']);
+      else {
+        if (!failed) setError(RECOGNITION_ERRORS['no-speech']);
+        onNothing?.();
+      }
     };
 
     setError(null);
@@ -99,9 +106,10 @@ export function useSpeechRecognition() {
   }, []);
 
   const stop = useCallback(() => active.current?.stop(), []);
+  const cancel = useCallback(() => active.current?.abort(), []);
   const clearError = useCallback(() => setError(null), []);
 
-  return { supported, listening, transcript, error, start, stop, clearError };
+  return { supported, listening, transcript, error, start, stop, cancel, clearError };
 }
 
 export function useSpeechSynthesis() {
@@ -137,7 +145,13 @@ export function useSpeechSynthesis() {
 
   /** Returns whether speech started; failures are reported through `error`. */
   const speak = useCallback(
-    (text: string, lang: string, languageName: string, id: string): boolean => {
+    (
+      text: string,
+      lang: string,
+      languageName: string,
+      id: string,
+      onDone?: () => void
+    ): boolean => {
       if (!supported) {
         setError('This browser cannot play speech.');
         return false;
@@ -154,11 +168,15 @@ export function useSpeechSynthesis() {
       const next = new SpeechSynthesisUtterance(text);
       next.lang = voice.lang;
       next.voice = voice;
-      next.onend = () => setSpeakingId(null);
+      next.onend = () => {
+        setSpeakingId(null);
+        onDone?.();
+      };
       next.onerror = event => {
         setSpeakingId(null);
         if (event.error !== 'canceled' && event.error !== 'interrupted') {
           setError('Playback failed. Please try again.');
+          onDone?.();
         }
       };
 

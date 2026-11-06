@@ -1,30 +1,78 @@
+import type { ReactNode } from 'react';
 import {
+  ArrowDown,
+  ArrowUp,
+  BedDouble,
   CheckCircle2,
   Circle,
   Clock,
   ExternalLink,
-  MapPin,
+  Plus,
   Star,
+  Trash2,
   Utensils,
 } from 'lucide-react';
-import type { Attraction, DayItinerary, Restaurant } from '../types';
+import type { Attraction, DayItinerary, Hotel, Restaurant, RouteLeg } from '../types';
+import { dishForCuisine } from '../lib/catalog';
 import {
   buildTimeline,
   feeLabel,
+  formatMinutes,
   hasRealRating,
   inr,
   mealCost,
   placeUrl,
-  stopKey,
+  type MealKind,
 } from '../lib/format';
 import { PlaceImage, usePhoto } from './ui';
+
+const MEAL_LABELS: Record<MealKind, string> = {
+  breakfast: 'Breakfast',
+  lunch: 'Lunch',
+  dinner: 'Dinner',
+};
+
+function Row({
+  time,
+  selected,
+  children,
+}: {
+  time: string;
+  selected: boolean;
+  children: ReactNode;
+}) {
+  return (
+    <div className="flex gap-2.5">
+      <span className="w-10 flex-shrink-0 pt-3 text-xs font-bold text-forest-500">{time}</span>
+      <div className={`min-w-0 flex-1 rounded-xl border p-2 transition-colors ${
+        selected ? 'border-teal-500 bg-teal-50/60' : 'border-line bg-white'
+      }`}>
+        {children}
+      </div>
+    </div>
+  );
+}
+
+function Connector({ leg }: { leg?: RouteLeg }) {
+  if (!leg) return <div className="h-1.5" />;
+  return (
+    <p className="my-0.5 ml-[3.25rem] border-l-2 border-dotted border-forest-200 py-0.5 pl-3 text-xs text-ink-mute">
+      {leg.duration_min === null
+        ? 'No road route'
+        : `${formatMinutes(leg.duration_min)} · ${leg.distance_km.toFixed(1)} km`}
+    </p>
+  );
+}
 
 function StopDetails({ attraction, city }: { attraction: Attraction; city: string }) {
   const { data: photo } = usePhoto(attraction.name, city);
 
   return (
-    <div className="mt-2.5 space-y-2 text-sm text-ink-soft">
+    <div className="mt-2 space-y-1.5 text-sm text-ink-soft">
       {photo?.description && <p>{photo.description}</p>}
+      {attraction.opening_hours && (
+        <p><span className="font-semibold">Hours:</span> {attraction.opening_hours}</p>
+      )}
       <div className="flex flex-wrap gap-x-4 gap-y-1">
         <a
           href={placeUrl(attraction.name, attraction)}
@@ -41,7 +89,7 @@ function StopDetails({ attraction, city }: { attraction: Attraction; city: strin
             rel="noreferrer"
             className="inline-flex items-center gap-1 font-semibold text-forest-700 hover:underline"
           >
-            Wikipedia <ExternalLink size={12} />
+            Photo source <ExternalLink size={12} />
           </a>
         )}
       </div>
@@ -55,24 +103,28 @@ function Stop({
   city,
   isSelected,
   isVisited,
+  isFirst,
+  isLast,
   onSelect,
   onToggleVisited,
+  onMove,
+  onRemove,
 }: {
   attraction: Attraction;
   number: number;
   city: string;
   isSelected: boolean;
   isVisited: boolean;
+  isFirst: boolean;
+  isLast: boolean;
   onSelect: () => void;
   onToggleVisited: () => void;
+  onMove: (direction: -1 | 1) => void;
+  onRemove: () => void;
 }) {
   return (
-    <li
-      className={`rounded-xl border p-2.5 transition-colors ${
-        isSelected ? 'border-teal-500 bg-teal-50/50' : 'border-line bg-white'
-      }`}
-    >
-      <div className="flex items-start gap-2.5">
+    <>
+      <div className="flex items-start gap-2">
         <button
           type="button"
           onClick={onSelect}
@@ -85,18 +137,13 @@ function Stop({
               context={city}
               width={200}
               alt=""
-              className="h-16 w-16 rounded-lg"
+              className="h-14 w-14 rounded-lg"
             />
             <span className="absolute -left-1.5 -top-1.5 flex h-6 w-6 items-center justify-center rounded-full border-2 border-white bg-forest-800 text-xs font-bold text-white">
               {number}
             </span>
           </span>
           <span className="min-w-0">
-            <span className="block text-xs font-semibold text-forest-500">
-              {attraction.start_time
-                ? `${attraction.start_time}–${attraction.end_time}`
-                : 'Flexible'}
-            </span>
             <span className={`block font-bold leading-snug ${isVisited ? 'text-ink-mute line-through' : ''}`}>
               {attraction.name}
             </span>
@@ -124,129 +171,200 @@ function Stop({
           title={isVisited ? 'Visited' : 'Mark as visited'}
           className="icon-btn h-7 w-7 text-ink-mute hover:text-forest-700"
         >
-          {isVisited ? <CheckCircle2 size={20} className="text-teal-600" /> : <Circle size={20} />}
+          {isVisited ? <CheckCircle2 size={19} className="text-teal-600" /> : <Circle size={19} />}
         </button>
       </div>
 
-      {isSelected && <StopDetails attraction={attraction} city={city} />}
-    </li>
+      {isSelected && (
+        <>
+          <StopDetails attraction={attraction} city={city} />
+          <div className="mt-2 flex flex-wrap items-center gap-x-1 border-t border-line pt-2">
+            <button
+              type="button"
+              disabled={isFirst}
+              onClick={() => onMove(-1)}
+              aria-label={`Move ${attraction.name} earlier`}
+              className="btn-ghost px-2 py-1 text-xs"
+            >
+              <ArrowUp size={14} /> Earlier
+            </button>
+            <button
+              type="button"
+              disabled={isLast}
+              onClick={() => onMove(1)}
+              aria-label={`Move ${attraction.name} later`}
+              className="btn-ghost px-2 py-1 text-xs"
+            >
+              <ArrowDown size={14} /> Later
+            </button>
+            <button
+              type="button"
+              onClick={onRemove}
+              aria-label={`Remove ${attraction.name}`}
+              className="btn-ghost ml-auto px-2 py-1 text-xs text-red-700 hover:bg-red-50 hover:text-red-800"
+            >
+              <Trash2 size={14} /> Remove
+            </button>
+          </div>
+        </>
+      )}
+    </>
   );
 }
 
 function Meal({
   kind,
   meal,
-  isSelected,
   onSelect,
 }: {
-  kind: 'lunch' | 'dinner';
+  kind: MealKind;
   meal: Restaurant;
-  isSelected: boolean;
   onSelect: () => void;
 }) {
   const cost = mealCost(meal);
-  const lunch = kind === 'lunch';
+  const details = [meal.cuisine?.split(',')[0], meal.area].filter(Boolean).join(' · ');
 
   return (
-    <li>
-      <button
-        type="button"
-        onClick={onSelect}
-        className={`flex w-full items-center gap-2.5 rounded-xl border p-2.5 text-left transition-colors ${
-          isSelected ? 'border-teal-500 bg-teal-50/50' : 'border-dashed border-line bg-canvas hover:border-forest-200'
-        }`}
-      >
-        <span
-          className={`flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-lg ${
-            lunch ? 'bg-ember-500 text-ink' : 'bg-ink text-white'
-          }`}
-        >
-          <Utensils size={16} />
+    <button type="button" onClick={onSelect} className="flex w-full items-center gap-2.5 rounded-lg text-left">
+      <PlaceImage
+        query={dishForCuisine(meal.cuisine)}
+        width={200}
+        alt=""
+        icon={Utensils}
+        className="h-12 w-12 flex-shrink-0 rounded-lg"
+      />
+      <span className="min-w-0">
+        <span className="block text-xs font-bold text-ember-700">{MEAL_LABELS[kind]}</span>
+        <span className="block truncate text-sm font-bold">{meal.restaurant_name || 'Restaurant'}</span>
+        <span className="block truncate text-xs text-ink-soft">
+          {details}
+          {cost !== null && `${details ? ' · ' : ''}${meal.cost_is_estimate ? 'est. ' : ''}${inr(cost)}/person`}
         </span>
-        <span className="min-w-0">
-          <span className="block text-xs font-semibold text-forest-500">
-            {lunch ? 'Lunch' : 'Dinner'}
-          </span>
-          <span className="block truncate text-sm font-bold">
-            {meal.restaurant_name || 'Restaurant'}
-          </span>
-          <span className="block text-xs text-ink-soft">
-            {[meal.cuisine?.split(',')[0], meal.area].filter(Boolean).join(' · ')}
-            {cost !== null && (
-              <>
-                {meal.cuisine || meal.area ? ' · ' : ''}
-                {meal.cost_is_estimate ? `est. ${inr(cost)}` : inr(cost)}/person
-              </>
-            )}
-          </span>
-        </span>
-      </button>
-    </li>
+      </span>
+    </button>
   );
 }
 
-/** One day's plan, grouped into morning, afternoon and evening. */
+function HotelStop({
+  hotel,
+  leaving,
+  city,
+  onSelect,
+}: {
+  hotel: Hotel;
+  leaving: boolean;
+  city: string;
+  onSelect: () => void;
+}) {
+  return (
+    <button type="button" onClick={onSelect} className="flex w-full items-center gap-2.5 rounded-lg text-left">
+      <PlaceImage
+        query={hotel.name}
+        context={city}
+        width={200}
+        alt=""
+        icon={BedDouble}
+        className="h-12 w-12 flex-shrink-0 rounded-lg"
+      />
+      <span className="min-w-0">
+        <span className="block text-xs font-bold text-teal-700">
+          {leaving ? 'Leave hotel' : 'Back to hotel'}
+        </span>
+        <span className="block truncate text-sm font-bold">{hotel.name}</span>
+        <span className="block truncate text-xs text-ink-soft">
+          {hotel.stars ? `${'★'.repeat(hotel.stars)} ` : ''}{hotel.area}
+        </span>
+      </span>
+    </button>
+  );
+}
+
+/** One day from leaving the hotel to returning, in time order. */
 export default function ItineraryCard({
   day,
   city,
   selected,
   visited,
+  legs,
   onSelect,
   onToggleVisited,
+  onMove,
+  onRemove,
+  onAdd,
 }: {
   day: DayItinerary;
   city: string;
   selected: string | null;
   visited: string[];
+  legs: Map<string, RouteLeg>;
   onSelect: (key: string | null) => void;
   onToggleVisited: (key: string) => void;
+  onMove: (index: number, direction: -1 | 1) => void;
+  onRemove: (index: number) => void;
+  onAdd: () => void;
 }) {
-  const timeline = buildTimeline(day);
-
-  if (timeline.length === 0) {
-    return (
-      <p className="flex items-center gap-2 rounded-xl bg-canvas p-4 text-sm text-ink-soft">
-        <MapPin size={16} /> A free day with nothing scheduled.
-      </p>
-    );
-  }
+  const hotelKey = `${day.day}:hotel-out`;
+  const pick = (key: string) => onSelect(selected === key ? null : key);
 
   return (
-    <div className="space-y-4">
-      {timeline.map(([part, items]) => (
+    <div className="space-y-3">
+      {buildTimeline(day).map(([part, items]) => (
         <section key={part} aria-label={part}>
-          <h3 className="eyebrow mb-2">{part}</h3>
-          <ul className="space-y-2">
+          <h3 className="eyebrow mb-1.5">{part}</h3>
+          <ul>
             {items.map(item => {
-              if (item.kind === 'stop') {
-                const key = stopKey(day.day, item.attraction);
-                return (
-                  <Stop
-                    key={key}
-                    attraction={item.attraction}
-                    number={item.number}
-                    city={city}
-                    isSelected={selected === key}
-                    isVisited={visited.includes(key)}
-                    onSelect={() => onSelect(selected === key ? null : key)}
-                    onToggleVisited={() => onToggleVisited(key)}
-                  />
-                );
-              }
-              const key = `${day.day}:${item.kind}`;
+              const isHotel = item.kind === 'hotel';
+              const key = isHotel ? hotelKey : item.key;
               return (
-                <Meal
-                  key={key}
-                  kind={item.kind}
-                  meal={item.meal}
-                  isSelected={selected === key}
-                  onSelect={() => onSelect(selected === key ? null : key)}
-                />
+                <li key={item.key}>
+                  <Row
+                    time={item.kind === 'stop' && item.flexible ? 'Any' : item.time}
+                    selected={selected === key}
+                  >
+                    {item.kind === 'stop' && (
+                      <Stop
+                        attraction={item.attraction}
+                        number={item.number}
+                        city={city}
+                        isSelected={selected === key}
+                        isVisited={visited.includes(key)}
+                        isFirst={item.index === 0}
+                        isLast={item.index === day.attractions.length - 1}
+                        onSelect={() => pick(key)}
+                        onToggleVisited={() => onToggleVisited(key)}
+                        onMove={direction => onMove(item.index, direction)}
+                        onRemove={() => onRemove(item.index)}
+                      />
+                    )}
+                    {item.kind === 'hotel' && (
+                      <HotelStop
+                        hotel={item.hotel}
+                        leaving={item.leaving}
+                        city={city}
+                        onSelect={() => pick(key)}
+                      />
+                    )}
+                    {(item.kind === 'breakfast' || item.kind === 'lunch' || item.kind === 'dinner') && (
+                      <Meal kind={item.kind} meal={item.meal} onSelect={() => pick(key)} />
+                    )}
+                  </Row>
+                  <Connector leg={legs.get(item.key)} />
+                </li>
               );
             })}
           </ul>
         </section>
       ))}
+
+      <button type="button" onClick={onAdd} className="btn-secondary w-full">
+        <Plus size={16} /> Add a place to Day {day.day}
+      </button>
+
+      {(day.breakfast || day.lunch || day.dinner) && (
+        <p className="text-xs text-ink-mute">
+          Food photos show a typical dish, not the restaurant itself.
+        </p>
+      )}
     </div>
   );
 }

@@ -8,7 +8,7 @@ import {
   type ReactNode,
 } from 'react';
 import { readStored, STORAGE_KEYS, writeStored } from '../lib/storage';
-import type { Profile } from '../types';
+import type { ExplorePlace, Profile } from '../types';
 
 export const EMPTY_PROFILE: Profile = {
   name: '',
@@ -17,12 +17,14 @@ export const EMPTY_PROFILE: Profile = {
   sourceLanguage: 'en',
   targetLanguage: 'hi',
   savedDestinations: [],
+  savedPlaces: [],
 };
 
 interface ProfileContextValue {
   profile: Profile;
   updateProfile: (changes: Partial<Profile>) => void;
   toggleDestination: (city: string) => void;
+  togglePlace: (place: ExplorePlace) => void;
   resetProfile: () => void;
 }
 
@@ -56,14 +58,28 @@ export function ProfileProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
+  const togglePlace = useCallback((place: ExplorePlace) => {
+    setProfile(previous => {
+      const saved = previous.savedPlaces;
+      const next = {
+        ...previous,
+        savedPlaces: saved.some(item => item.id === place.id)
+          ? saved.filter(item => item.id !== place.id)
+          : [...saved, place],
+      };
+      writeStored(STORAGE_KEYS.profile, next);
+      return next;
+    });
+  }, []);
+
   const resetProfile = useCallback(() => {
     setProfile(EMPTY_PROFILE);
     writeStored(STORAGE_KEYS.profile, null);
   }, []);
 
   const value = useMemo(
-    () => ({ profile, updateProfile, toggleDestination, resetProfile }),
-    [profile, updateProfile, toggleDestination, resetProfile]
+    () => ({ profile, updateProfile, toggleDestination, togglePlace, resetProfile }),
+    [profile, updateProfile, toggleDestination, togglePlace, resetProfile]
   );
 
   return (

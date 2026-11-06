@@ -5,6 +5,8 @@ import type {
   ItineraryRequest,
   ItineraryResponse,
   PlacePhoto,
+  RoadRoute,
+  RouteMode,
   TranslationResult,
   Weather,
 } from '../types';
@@ -95,6 +97,14 @@ export const itineraApi = {
     const { data } = await api.get<Weather>('/weather/current', {
       params: { lat, lon },
     });
+    return data;
+  },
+
+  getRoadRoute: async (
+    waypoints: { latitude: number; longitude: number }[],
+    mode: RouteMode
+  ): Promise<RoadRoute> => {
+    const { data } = await api.post<RoadRoute>('/routing/route', { waypoints, mode });
     return data;
   },
 

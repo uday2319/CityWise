@@ -30,6 +30,7 @@ export interface Attraction {
   interest_tags: string[];
   semantic_score?: number | null;   // SBERT similarity score (0–1)
   placeholder_metrics?: boolean;    // rating and fee are defaults, not data
+  opening_hours?: string | null;
 }
 
 export interface Restaurant {
@@ -43,10 +44,22 @@ export interface Restaurant {
   cost_is_estimate?: boolean;       // cost_for_two is assumed, not data
 }
 
+export interface Hotel {
+  name: string;
+  area?: string | null;
+  address?: string | null;
+  stars?: number | null;
+  website?: string | null;
+  latitude?: number | null;
+  longitude?: number | null;
+}
+
 export interface DayItinerary {
   day: number;
   title: string;
   attractions: Attraction[];
+  hotel?: Hotel | null;
+  breakfast?: Restaurant | null;
   lunch?: Restaurant | null;
   dinner?: Restaurant | null;
   day_budget_actual: number;        // computed actual cost
@@ -109,6 +122,7 @@ export interface PlacePhoto {
   title?: string;
   description?: string | null;
   source_url?: string;
+  credit?: string | null;
 }
 
 export interface Weather {
@@ -120,6 +134,24 @@ export interface Weather {
   weather_code: number;
   high_c: number;
   low_c: number;
+  forecast: { date: string; high_c: number; low_c: number; condition: string }[];
+}
+
+export type RouteMode = 'drive' | 'walk' | 'bicycle';
+
+export interface RouteLeg {
+  distance_km: number;
+  duration_min: number | null;      // null when the leg has no road route
+  routed: boolean;
+  geometry: [number, number][];
+}
+
+export interface RoadRoute {
+  mode: RouteMode;
+  partial: boolean;                 // true when some legs have no road route
+  distance_km: number;
+  duration_min: number;
+  legs: RouteLeg[];
 }
 
 export interface TranslationResult {
@@ -148,4 +180,5 @@ export interface Profile {
   sourceLanguage: string;
   targetLanguage: string;
   savedDestinations: string[];
+  savedPlaces: ExplorePlace[];
 }

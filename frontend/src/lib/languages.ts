@@ -26,7 +26,9 @@ export const PHRASE_GROUPS: { title: string; phrases: string[] }[] = [
   {
     title: 'Directions',
     phrases: [
-      'Where is the nearest railway station?',
+      'Where is the railway station?',
+      'Where is the nearest hotel?',
+      'Please take me to this location.',
       'How do I get to this address?',
       'Is it far from here?',
     ],
@@ -34,7 +36,9 @@ export const PHRASE_GROUPS: { title: string; phrases: string[] }[] = [
   {
     title: 'Food',
     phrases: [
-      'Can you recommend a restaurant?',
+      'Where is the nearest restaurant?',
+      'Can I see the menu?',
+      'I would like to order this food.',
       'I am vegetarian.',
       'Please bring the bill.',
     ],
@@ -50,7 +54,7 @@ export const PHRASE_GROUPS: { title: string; phrases: string[] }[] = [
   {
     title: 'Transport',
     phrases: [
-      'Please take me to this address.',
+      'Please call a taxi for me.',
       'Which bus goes to the city centre?',
       'Please use the meter.',
     ],
@@ -67,6 +71,7 @@ export const PHRASE_GROUPS: { title: string; phrases: string[] }[] = [
     title: 'Emergency',
     phrases: [
       'I need help.',
+      'Do you speak English?',
       'Where is the nearest hospital?',
       'Please call the police.',
     ],

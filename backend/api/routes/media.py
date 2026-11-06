@@ -11,6 +11,7 @@ from backend.services.http_client import get_client
 router = APIRouter()
 
 WIKIPEDIA_API = "https://en.wikipedia.org/w/api.php"
+COMMONS_API = "https://commons.wikimedia.org/w/api.php"
 # Wikimedia requires clients to identify themselves with a project URL.
 HEADERS = {"User-Agent": "CityWise/1.0 (https://github.com/uday2319/CityWise) httpx"}
 MAX_CACHE = 1000
@@ -39,6 +40,61 @@ def _matches_place(page: dict, name: str, context: Optional[str]) -> bool:
     if context and context.lower() not in f"{title} {page.get('extract', '')}".lower():
         return False
     return True
+
+
+def _strip_markup(text: str) -> str:
+    return html.unescape(re.sub(r"<[^>]+>", "", text)).strip()
+
+
+async def _commons_photo(name: str, context: str, width: int) -> Optional[dict]:
+    """
+    A photo file on Wikimedia Commons for places without a Wikipedia article.
+    Filenames are less reliable than article titles, so the file must name
+    both the place and its city.
+    """
+    params = {
+        "action": "query",
+        "format": "json",
+        "generator": "search",
+        "gsrnamespace": 6,
+        "gsrsearch": f"{name} {context}",
+        "gsrlimit": 5,
+        "prop": "imageinfo",
+        "iiprop": "url|mime|extmetadata",
+        "iiurlwidth": width,
+        "iiextmetadatafilter": "Artist|LicenseShortName",
+    }
+    async with _wikipedia_slots:
+        response = await get_client().get(
+            COMMONS_API, params=params, headers=HEADERS, timeout=10
+        )
+    response.raise_for_status()
+
+    pages = sorted(
+        response.json().get("query", {}).get("pages", {}).values(),
+        key=lambda p: p.get("index", 0),
+    )
+    required = (_tokens(name) - _tokens(context)) or _tokens(name)
+
+    for page in pages:
+        info = (page.get("imageinfo") or [{}])[0]
+        title_words = _tokens(page.get("title", ""))
+        if info.get("mime") != "image/jpeg" or not info.get("thumburl"):
+            continue
+        if not required <= title_words or not _tokens(context) <= title_words:
+            continue
+        metadata = info.get("extmetadata", {})
+        artist = _strip_markup(metadata.get("Artist", {}).get("value", ""))
+        licence = metadata.get("LicenseShortName", {}).get("value", "")
+        return {
+            "found": True,
+            "url": info["thumburl"],
+            "title": page.get("title", "").removeprefix("File:").rsplit(".", 1)[0],
+            "description": None,
+            "source_url": info.get("descriptionurl"),
+            "credit": ", ".join(part for part in (artist[:80], licence) if part) or None,
+        }
+    return None
 
 
 @router.get("/photo")
@@ -99,8 +155,16 @@ async def place_photo(
                 "title": page.get("title"),
                 "description": html.unescape(page.get("extract", "")).strip() or None,
                 "source_url": page.get("fullurl"),
+                "credit": "Wikipedia",
             }
             break
+
+    if not result["found"] and context:
+        try:
+            result = await _commons_photo(query, context, width) or result
+        except (httpx.HTTPError, ValueError) as exc:
+            print(f"  [Media] Commons lookup failed for '{query}': {exc}")
+            return result
 
     if len(_photo_cache) < MAX_CACHE:
         _photo_cache[key] = result

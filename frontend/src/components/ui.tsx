@@ -5,6 +5,7 @@ import { AlertTriangle, Heart, X, type LucideIcon } from 'lucide-react';
 import { itineraApi } from '../api/itineraApi';
 import { CATEGORY_FALLBACK_ICON } from '../lib/catalog';
 import { useProfile } from '../context/ProfileContext';
+import type { ExplorePlace } from '../types';
 
 export function Skeleton({ className = '' }: { className?: string }) {
   return <div className={`skeleton ${className}`} aria-hidden="true" />;
@@ -122,7 +123,7 @@ export function PlaceImage({
   const settled = isSuccess || isError;
 
   return (
-    <div ref={box} className={`overflow-hidden ${className}`}>
+    <div ref={box} className={`overflow-hidden bg-forest-100 ${className}`}>
       {!settled && <Skeleton className="h-full w-full rounded-none" />}
       {settled && (!data?.url || failed) && (
         <div className="flex h-full w-full items-center justify-center bg-forest-100 text-forest-500">
@@ -165,16 +166,35 @@ export function SaveHeart({ city, className = '' }: { city: string; className?: 
   );
 }
 
+export function SavePlaceHeart({ place, className = '' }: { place: ExplorePlace; className?: string }) {
+  const { profile, togglePlace } = useProfile();
+  const saved = profile.savedPlaces.some(item => item.id === place.id);
+
+  return (
+    <button
+      type="button"
+      aria-pressed={saved}
+      aria-label={saved ? `Remove ${place.name} from favorites` : `Save ${place.name} to favorites`}
+      onClick={() => togglePlace(place)}
+      className={`icon-btn bg-white/95 text-ink shadow-soft hover:bg-white ${className}`}
+    >
+      <Heart size={17} className={saved ? 'fill-ember-500 text-ember-500' : ''} />
+    </button>
+  );
+}
+
 export function Dialog({
   open,
   title,
   onClose,
   children,
+  wide = false,
 }: {
   open: boolean;
   title: string;
   onClose: () => void;
   children: ReactNode;
+  wide?: boolean;
 }) {
   const ref = useRef<HTMLDialogElement>(null);
 
@@ -190,7 +210,7 @@ export function Dialog({
       ref={ref}
       onClose={onClose}
       aria-label={title}
-      className="m-auto w-[calc(100%-2rem)] max-w-lg rounded-2xl p-0 shadow-lift"
+      className={`m-auto w-[calc(100%-2rem)] rounded-2xl p-0 shadow-lift ${wide ? 'max-w-3xl' : 'max-w-lg'}`}
     >
       <div className="flex items-center justify-between border-b border-line px-5 py-3.5">
         <h2 className="font-bold">{title}</h2>

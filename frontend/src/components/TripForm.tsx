@@ -36,7 +36,7 @@ function BudgetPreview({ budget }: { budget: number }) {
       <p className="mb-2 flex items-center gap-1.5 text-xs font-bold text-forest-800">
         <Info size={13} /> {budgetLabel(budget)}: how {inr(budget)} a day is used
       </p>
-      <dl className="grid gap-x-5 gap-y-1 text-xs sm:grid-cols-2">
+      <dl className="grid gap-y-1 text-xs">
         {rows.map(([label, value]) => (
           <div key={label} className="flex justify-between">
             <dt className="text-ink-soft">{label}</dt>
@@ -106,10 +106,10 @@ export default function TripForm({ initial, loading, onSubmit }: Props) {
   };
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-6">
+    <form onSubmit={handleSubmit} className="space-y-5">
       <CityInput value={city} onChange={setCity} required />
 
-      <div className="grid gap-5 sm:grid-cols-2">
+      <div className="space-y-5">
         <div>
           <label htmlFor="trip-days" className="label">
             Duration: {days} {days === 1 ? 'day' : 'days'}

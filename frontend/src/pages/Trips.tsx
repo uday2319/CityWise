@@ -160,7 +160,7 @@ export default function Trips() {
         <div>
           <h1 className="text-3xl font-extrabold">My Trips</h1>
           <p className="mt-1 text-ink-soft">
-            Saved on this device. Add a start date to sort a trip into upcoming or previous.
+            Saved on this device. Add a start date to sort trips into upcoming or previous.
           </p>
         </div>
         <Link to="/planner" className="btn-primary">Plan a new trip</Link>

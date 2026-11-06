@@ -14,6 +14,7 @@ from backend.schemas.itinerary_schema import (
     BudgetAllocation,
     DayItinerary,
     AttractionResponse,
+    HotelResponse,
     RestaurantResponse,
 )
 
@@ -76,6 +77,7 @@ def _format_itinerary_response(
                 interest_tags=a.get("interest_tags", []),
                 semantic_score=a.get("semantic_score"),
                 placeholder_metrics=bool(a.get("placeholder_metrics", False)),
+                opening_hours=a.get("opening_hours"),
             )
             for a in day_data.get("attractions", [])
         ]
@@ -88,6 +90,8 @@ def _format_itinerary_response(
             day=day_data["day"],
             title=day_data["title"],
             attractions=attractions_resp,
+            hotel=HotelResponse(**day_data["hotel"]) if day_data.get("hotel") else None,
+            breakfast=_format_restaurant(day_data.get("breakfast")),
             lunch=_format_restaurant(day_data.get("lunch")),
             dinner=_format_restaurant(day_data.get("dinner")),
             day_budget_actual=day_actual,

@@ -4,7 +4,7 @@ from fastapi.middleware.gzip import GZipMiddleware
 from contextlib import asynccontextmanager
 
 from backend.core.config import settings
-from backend.api.routes import itinerary, attractions, restaurants, cities, analytics, media, weather, translate
+from backend.api.routes import itinerary, attractions, restaurants, cities, analytics, media, weather, translate, routing
 from backend.services.http_client import close_client
 from backend.services.ml_service import MLService
 
@@ -58,6 +58,7 @@ app.include_router(analytics.router, prefix="/api/v1/analytics", tags=["analytic
 app.include_router(media.router, prefix="/api/v1/media", tags=["media"])
 app.include_router(weather.router, prefix="/api/v1/weather", tags=["weather"])
 app.include_router(translate.router, prefix="/api/v1/translate", tags=["translate"])
+app.include_router(routing.router, prefix="/api/v1/routing", tags=["routing"])
 
 
 @app.get("/")

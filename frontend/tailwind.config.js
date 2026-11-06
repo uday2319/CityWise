@@ -19,7 +19,8 @@ export default {
           500: '#F28C45',
           700: '#B4561A',
         },
-        canvas: '#F5F7F4',
+        pine: '#0F3935',
+        canvas: '#F7F7F2',
         line: '#E1E6E2',
         ink: {
           DEFAULT: '#1E2925',

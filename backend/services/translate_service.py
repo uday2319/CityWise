@@ -12,7 +12,7 @@ from typing import Optional
 import httpx
 
 from backend.core.config import settings
-from backend.services.http_client import get_client
+from backend.services.http_client import get_client, get_with_retry
 
 LANGUAGES = {
     "en": "English", "kn": "Kannada", "hi": "Hindi", "ta": "Tamil",
@@ -95,7 +95,7 @@ async def _translate_google(text: str, source: str, target: str) -> dict:
 async def _translate_mymemory(text: str, source: str, target: str) -> dict:
     params = {"q": text, "langpair": f"{source}|{target}", "mt": 1}
     try:
-        response = await get_client().get(MYMEMORY_URL, params=params)
+        response = await get_with_retry(MYMEMORY_URL, params=params)
         response.raise_for_status()
         data = response.json()
     except (httpx.HTTPError, ValueError) as exc:

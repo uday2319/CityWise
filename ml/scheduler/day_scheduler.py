@@ -63,7 +63,8 @@ class DayScheduler:
 
         for attraction in day_attractions:
             if not lunch_inserted and current_time >= "12:00":
-                current_time = "13:30"
+                # A full hour for lunch, even after a long morning visit.
+                current_time = max("13:30", self._time_add(current_time, 1.0))
                 lunch_inserted = True
 
             attraction = attraction.copy()
@@ -166,6 +167,7 @@ class DayScheduler:
             "longitude": row.get("longitude"),
             "interest_tags": str(row.get("interest_tags_str", "")).split("|"),
             "semantic_score": row.get("semantic_score"),
+            "opening_hours": row.get("opening_hours") if pd.notna(row.get("opening_hours")) else None,
             "placeholder_metrics": bool(row.get("placeholder_metrics", False)),
         }
 

@@ -6,11 +6,14 @@ from typing import Optional
 from backend.core.config import settings
 from ml.recommender.semantic_search import AttractionRecommender
 from ml.ranking.train_ranker import AttractionRanker
-from ml.scheduler.day_scheduler import DayScheduler
+from ml.optimizer.route_optimizer import haversine_distance, solve_tsp
+from ml.scheduler.day_scheduler import DayScheduler, _coord, _route_distance_km
 
 # Assumed meal cost for two when a restaurant has no price data.
 # Such meals are flagged cost_is_estimate so the UI can say so.
 ESTIMATED_MEAL_COST_FOR_TWO = 800.0
+ESTIMATED_BREAKFAST_COST_FOR_TWO = 300.0
+HOTEL_SEARCH_DEGREES = 0.03   # about 3 km around the centre of the trip
 LUNCH_BUDGET_FRACTION = 0.40
 
 # Set USE_GEOAPIFY=true in .env to use live Geoapify data.
@@ -120,6 +123,129 @@ class MLService:
         df["cost_is_estimate"] = True
         return df
 
+    def _add_stays(
+        self,
+        itinerary: list[dict],
+        city: str,
+        restaurants: Optional[pd.DataFrame],
+    ) -> None:
+        """
+        Adds a hotel central to the trip and a breakfast near it to each day.
+        Both are extras: if either lookup fails the itinerary stays valid.
+        """
+        if not settings.USE_GEOAPIFY:
+            return
+
+        from backend.services.geo_service import get_hotels
+
+        points = [
+            (float(a["latitude"]), float(a["longitude"]))
+            for day in itinerary
+            for a in day["attractions"]
+            if a.get("latitude") is not None and pd.notna(a.get("latitude"))
+            and a.get("longitude") is not None and pd.notna(a.get("longitude"))
+        ]
+        if not points:
+            return
+
+        lat = sum(p[0] for p in points) / len(points)
+        lon = sum(p[1] for p in points) / len(points)
+        nearest = lambda r: (r["latitude"] - lat) ** 2 + (r["longitude"] - lon) ** 2
+
+        try:
+            hotels = get_hotels(city)
+        except Exception as exc:
+            print(f"  [MLService] Hotel lookup failed: {exc}")
+            hotels = []
+
+        # Few hotels have a real star rating, so use them when they are close.
+        rated = [
+            h for h in hotels
+            if h.get("stars") and nearest(h) <= HOTEL_SEARCH_DEGREES ** 2
+        ]
+        if rated:
+            hotel = max(rated, key=lambda h: (h["stars"], -nearest(h)))
+        else:
+            hotel = min(hotels, key=nearest) if hotels else None
+
+        if hotel:
+            for day in itinerary:
+                self._order_from_hotel(day, hotel)
+
+        # Only live restaurants are known to have coordinates and estimates.
+        pool: list[dict] = []
+        if restaurants is not None and "cost_is_estimate" in restaurants.columns:
+            pool = restaurants.to_dict("records")
+
+        used: set[str] = set()
+
+        def closest_meal(point: tuple[float, float]) -> Optional[dict]:
+            free = [r for r in pool if str(r["restaurant_name"]).lower() not in used]
+            if not free:
+                return None
+            meal = min(
+                free,
+                key=lambda r: (r["latitude"] - point[0]) ** 2
+                + (r["longitude"] - point[1]) ** 2,
+            )
+            used.add(str(meal["restaurant_name"]).lower())
+            return meal
+
+        for day in itinerary:
+            day["hotel"] = hotel
+            if not pool:
+                continue
+
+            # Stops may have moved, so choose meals that suit the new order.
+            stops = [c for c in map(_coord, day["attractions"]) if c]
+            if stops:
+                day["lunch"] = closest_meal(stops[(len(stops) - 1) // 2]) or day["lunch"]
+                day["dinner"] = closest_meal(stops[-1]) or day["dinner"]
+
+            start = _coord(hotel) if hotel else (stops[0] if stops else None)
+            found = closest_meal(start) if start else None
+            if not found:
+                continue
+            breakfast = dict(found)
+            breakfast["cost_for_two"] = min(
+                ESTIMATED_BREAKFAST_COST_FOR_TWO, float(breakfast["cost_for_two"])
+            )
+            day["breakfast"] = breakfast
+            day["day_budget_actual"] = round(
+                day["day_budget_actual"] + breakfast["cost_for_two"] / 2, 2
+            )
+            limit = day["day_budget_limit"]
+            day["budget_utilization_pct"] = (
+                round(day["day_budget_actual"] / limit * 100, 1) if limit > 0 else 0
+            )
+
+    def _order_from_hotel(self, day: dict, hotel: dict) -> None:
+        """
+        Re-solves the day as a round trip from the hotel, nearest stop first.
+        Flexible leisure days have no timed stops and are left as they are.
+        """
+        stops = [a for a in day["attractions"] if _coord(a) and a.get("start_time")]
+        if len(stops) < 2 or len(stops) != len(day["attractions"]):
+            return
+
+        start = _coord(hotel)
+        locations = [start] + [_coord(a) for a in stops]
+        tour = solve_tsp(
+            locations,
+            ["Hotel"] + [a["name"] for a in stops],
+            time_limit_seconds=1,
+        )
+        ordered = [stops[i - 1] for i in tour if i != 0]
+
+        # A round trip can run either way: begin with the closer end.
+        if haversine_distance(start, _coord(ordered[-1])) < haversine_distance(
+            start, _coord(ordered[0])
+        ):
+            ordered.reverse()
+
+        day["attractions"] = self.scheduler._assign_time_slots(ordered)
+        day["total_distance_km"] = _route_distance_km(day["attractions"])
+
     @staticmethod
     def _drop_excluded(
         df: pd.DataFrame, exclude_places: Optional[list[str]], min_keep: int
@@ -225,11 +351,13 @@ class MLService:
         print(f"[MLService] Passing {len(ranked)} candidates to scheduler")
 
         # ── Step 5: Schedule ───────────────────────────────────────────────
+        restaurants = self._restaurants_for_city(city, effective_budget)
+
         itinerary = self.scheduler.build_itinerary(
             city=city,
             duration_days=duration_days,
             attractions=ranked,
-            restaurants=self._restaurants_for_city(city, effective_budget),
+            restaurants=restaurants,
             budget_per_day_inr=effective_budget,
             preference_text=preference_text,
         )
@@ -239,5 +367,7 @@ class MLService:
                 f"Scheduler produced no days for '{city}'. "
                 "The attraction pool may be too small for the requested duration."
             )
+
+        self._add_stays(itinerary, city, restaurants)
 
         return itinerary

@@ -201,6 +201,7 @@ class AttractionResponse(BaseModel):
     # True when rating/entrance_fee are defaults, not real data (Geoapify
     # supplies neither). Clients should not display them as facts.
     placeholder_metrics: bool = False
+    opening_hours: Optional[str] = None
 
     class Config:
         from_attributes = True
@@ -220,10 +221,22 @@ class RestaurantResponse(BaseModel):
         from_attributes = True
 
 
+class HotelResponse(BaseModel):
+    name: str
+    area: Optional[str] = None
+    address: Optional[str] = None
+    stars: Optional[int] = None
+    website: Optional[str] = None
+    latitude: Optional[float] = None
+    longitude: Optional[float] = None
+
+
 class DayItinerary(BaseModel):
     day: int
     title: str
     attractions: List[AttractionResponse]
+    hotel: Optional[HotelResponse] = None
+    breakfast: Optional[RestaurantResponse] = None
     lunch: Optional[RestaurantResponse]
     dinner: Optional[RestaurantResponse]
     day_budget_actual: float          # actual computed cost for this day

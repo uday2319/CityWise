@@ -19,6 +19,7 @@ import {
   ErrorNotice,
   PlaceImage,
   SaveHeart,
+  SavePlaceHeart,
   Skeleton,
   usePhoto,
 } from '../components/ui';
@@ -39,7 +40,10 @@ function PlaceDetails({ place }: { place: ExplorePlace }) {
         alt={place.name}
         className="h-48 w-full rounded-xl"
       />
-      <p className="font-semibold text-forest-500">{place.category}</p>
+      <div className="flex items-center justify-between gap-2">
+        <p className="font-semibold text-forest-500">{place.category}</p>
+        <SavePlaceHeart place={place} className="border border-line" />
+      </div>
       {photo?.description && <p className="text-ink-soft">{photo.description}</p>}
       {place.address && (
         <p className="flex gap-2 text-ink-soft">
@@ -118,6 +122,9 @@ export default function Explore() {
   return (
     <div className="mx-auto max-w-6xl px-4 py-8 sm:px-6">
       <h1 className="text-3xl font-extrabold">Explore destinations</h1>
+      <p className="mt-3 border-l-4 border-ember-500 pl-3 text-xl font-bold leading-snug text-forest-900">
+        Every Destination Has a Story. Start Yours Today.
+      </p>
       <p className="mt-1 text-ink-soft">
         Search a city to see its places, then narrow them down by interest.
       </p>
@@ -162,15 +169,15 @@ export default function Explore() {
                 <button
                   type="button"
                   onClick={() => {
-                    setCityInput(destination.city);
-                    setFilters(destination.city, interestKey);
+                    setCityInput(destination.query);
+                    setFilters(destination.query, interestKey);
                   }}
                   className="card h-full w-full overflow-hidden text-left transition-shadow hover:shadow-lift"
                 >
                   <PlaceImage
-                    query={destination.photo}
+                    query={destination.photos[0]}
                     width={640}
-                    alt={destination.photo}
+                    alt={destination.photos[0]}
                     className="h-36 w-full"
                   />
                   <div className="p-3.5">
@@ -255,7 +262,8 @@ export default function Explore() {
                 </p>
                 <ul className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
                   {visible.map(place => (
-                    <li key={place.id}>
+                    <li key={place.id} className="relative">
+                      <SavePlaceHeart place={place} className="absolute right-2.5 top-2.5 z-10" />
                       <button
                         type="button"
                         onClick={() => setSelected(place)}

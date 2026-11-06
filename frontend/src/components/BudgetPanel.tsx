@@ -16,7 +16,7 @@ export default function BudgetPanel({
   const utilPct = totalLimit > 0 ? Math.round((totalActual / totalLimit) * 100) : 0;
 
   const stops = itinerary.days.flatMap(day => day.attractions);
-  const meals = itinerary.days.flatMap(day => [day.lunch, day.dinner]);
+  const meals = itinerary.days.flatMap(day => [day.breakfast, day.lunch, day.dinner]);
 
   const attrCosts = stops.reduce((sum, a) => sum + (a.entrance_fee || 0), 0);
   const foodCosts = meals.reduce((sum, meal) => sum + (mealCost(meal) ?? 0), 0);
@@ -32,7 +32,7 @@ export default function BudgetPanel({
   ];
 
   return (
-    <section aria-label="Budget breakdown" className="card p-5 sm:p-6">
+    <section aria-label="Budget breakdown">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <h2 className="flex items-center gap-2 text-lg font-bold">
           <TrendingUp size={18} className="text-forest-500" />

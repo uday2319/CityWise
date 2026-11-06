@@ -1,4 +1,11 @@
-import type { Attraction, DayItinerary, Restaurant, Trip } from '../types';
+import type {
+  Attraction,
+  DayItinerary,
+  Hotel,
+  Restaurant,
+  RouteMode,
+  Trip,
+} from '../types';
 
 export const inr = (amount: number): string =>
   `₹${Math.round(amount).toLocaleString('en-IN')}`;
@@ -22,28 +29,18 @@ export function isValidCoord(lat: unknown, lng: unknown): boolean {
 export const hasCoord = (place: Located): boolean =>
   isValidCoord(place.latitude, place.longitude);
 
-export function haversineKm(a: Located, b: Located): number {
-  const rad = (deg: number) => (deg * Math.PI) / 180;
-  const dLat = rad(Number(b.latitude) - Number(a.latitude));
-  const dLon = rad(Number(b.longitude) - Number(a.longitude));
-  const h =
-    Math.sin(dLat / 2) ** 2 +
-    Math.cos(rad(Number(a.latitude))) * Math.cos(rad(Number(b.latitude))) *
-      Math.sin(dLon / 2) ** 2;
-  return 6371 * 2 * Math.asin(Math.sqrt(h));
-}
-
-// Straight-line km to rough city driving time: roads wind about 1.3× the
-// direct distance, and urban traffic averages about 20 km/h.
-export const estimateTravelMinutes = (km: number): number =>
-  Math.round(((km * 1.3) / 20) * 60);
-
 export function formatMinutes(minutes: number): string {
-  if (minutes < 60) return `${minutes} min`;
+  if (minutes < 60) return `${Math.max(1, minutes)} min`;
   const hours = Math.floor(minutes / 60);
   const rest = minutes % 60;
   return rest ? `${hours} h ${rest} min` : `${hours} h`;
 }
+
+export const ROUTE_MODES: { key: RouteMode; label: string }[] = [
+  { key: 'drive', label: 'Driving' },
+  { key: 'walk', label: 'Walking' },
+  { key: 'bicycle', label: 'Cycling' },
+];
 
 /** Per-person meal price, or null when the restaurant has no price. */
 export const mealCost = (meal?: Restaurant | null): number | null =>
@@ -83,40 +80,88 @@ export const placeUrl = (name: string, place: Located): string =>
     query: hasCoord(place) ? `${place.latitude},${place.longitude}` : name,
   }).toString()}`;
 
-export type DayPart = 'Morning' | 'Afternoon' | 'Evening' | 'Any time';
+export type DayPart = 'Morning' | 'Afternoon' | 'Evening';
+export type MealKind = 'breakfast' | 'lunch' | 'dinner';
 
 export type TimelineItem =
-  | { kind: 'stop'; time?: string | null; attraction: Attraction; number: number }
-  | { kind: 'lunch' | 'dinner'; time: string; meal: Restaurant };
+  | { kind: 'stop'; key: string; time: string; flexible: boolean; attraction: Attraction; number: number; index: number }
+  | { kind: MealKind; key: string; time: string; meal: Restaurant }
+  | { kind: 'hotel'; key: string; time: string; hotel: Hotel; leaving: boolean };
 
-export function buildTimeline(day: DayItinerary): [DayPart, TimelineItem[]][] {
+const FLEXIBLE_TIME = '10:00';
+
+function lunchTime(day: DayItinerary): string {
+  const beforeLunch = day.attractions
+    .filter(a => a.start_time && a.start_time < '12:00' && a.end_time)
+    .map(a => a.end_time as string)
+    .sort();
+  const lastEnd = beforeLunch[beforeLunch.length - 1];
+  return lastEnd && lastEnd > '12:30' ? lastEnd : '12:30';
+}
+
+/** The whole day in order: hotel, meals and attractions together. */
+export function dayItems(day: DayItinerary): TimelineItem[] {
   const items: TimelineItem[] = day.attractions.map((attraction, index) => ({
     kind: 'stop',
-    time: attraction.start_time,
+    key: stopKey(day.day, attraction),
+    time: attraction.start_time ?? FLEXIBLE_TIME,
+    flexible: !attraction.start_time,
     attraction,
     number: index + 1,
+    index,
   }));
-  if (day.lunch) items.push({ kind: 'lunch', time: '12:30', meal: day.lunch });
-  if (day.dinner) items.push({ kind: 'dinner', time: '19:30', meal: day.dinner });
 
-  const partOf = (time?: string | null): DayPart => {
-    if (!time) return 'Any time';
+  if (day.hotel) {
+    items.push({ kind: 'hotel', key: `${day.day}:hotel-out`, time: '08:00', hotel: day.hotel, leaving: true });
+    items.push({ kind: 'hotel', key: `${day.day}:hotel-in`, time: '21:00', hotel: day.hotel, leaving: false });
+  }
+  if (day.breakfast) items.push({ kind: 'breakfast', key: `${day.day}:breakfast`, time: '08:15', meal: day.breakfast });
+  if (day.lunch) items.push({ kind: 'lunch', key: `${day.day}:lunch`, time: lunchTime(day), meal: day.lunch });
+  if (day.dinner) items.push({ kind: 'dinner', key: `${day.day}:dinner`, time: '19:30', meal: day.dinner });
+
+  return items.sort((a, b) => a.time.localeCompare(b.time));
+}
+
+export function buildTimeline(day: DayItinerary): [DayPart, TimelineItem[]][] {
+  const partOf = (time: string): DayPart => {
     if (time < '12:00') return 'Morning';
     return time < '17:00' ? 'Afternoon' : 'Evening';
   };
-
-  const sorted = [...items].sort((a, b) =>
-    (a.time ?? '').localeCompare(b.time ?? '')
-  );
-
-  const order: DayPart[] = ['Any time', 'Morning', 'Afternoon', 'Evening'];
-  return order
+  const items = dayItems(day);
+  return (['Morning', 'Afternoon', 'Evening'] as DayPart[])
     .map((part): [DayPart, TimelineItem[]] => [
       part,
-      sorted.filter(item => partOf(item.time) === part),
+      items.filter(item => partOf(item.time) === part),
     ])
     .filter(([, group]) => group.length > 0);
 }
+
+const placeOf = (item: TimelineItem): Located & { name: string } => {
+  if (item.kind === 'stop') return item.attraction;
+  if (item.kind === 'hotel') return item.hotel;
+  return { ...item.meal, name: item.meal.restaurant_name ?? 'Restaurant' };
+};
+
+export interface Waypoint {
+  key: string;
+  name: string;
+  latitude: number;
+  longitude: number;
+}
+
+/** Every mappable point of the day, in the order the traveller reaches it. */
+export const dayWaypoints = (day: DayItinerary): Waypoint[] =>
+  dayItems(day).flatMap(item => {
+    const place = placeOf(item);
+    return hasCoord(place)
+      ? [{
+          key: item.key,
+          name: place.name,
+          latitude: Number(place.latitude),
+          longitude: Number(place.longitude),
+        }]
+      : [];
+  });
 
 /** What is known about a stop's price. Geoapify places have no fee data. */
 export function feeLabel(attraction: Attraction): string {
@@ -129,3 +174,11 @@ export const hasRealRating = (rating?: number | null, placeholder?: boolean) =>
 
 export const cleanTitle = (title: string, day: number): string =>
   title.replace(new RegExp(`^Day ${day}\\s*.\\s*`), '');
+
+/** The calendar date of a trip day, when the trip has a start date. */
+export function dayDate(startDate: string | undefined, day: number): string | null {
+  if (!startDate) return null;
+  const date = new Date(`${startDate}T00:00:00`);
+  date.setDate(date.getDate() + day - 1);
+  return date.toLocaleDateString('en-IN', { day: 'numeric', month: 'short' });
+}
