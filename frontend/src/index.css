@@ -1,64 +1,125 @@
-@import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;700&family=DM+Sans:wght@300;400;500;600&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap');
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
-:root {
-  --color-primary: #f97316;
-  --color-secondary: #14b8a6;
-  --color-dark: #0f172a;
+@layer base {
+  html {
+    -webkit-text-size-adjust: 100%;
+  }
+
+  body {
+    @apply bg-canvas font-sans text-ink antialiased;
+  }
+
+  h1, h2, h3, h4 {
+    @apply tracking-tight;
+  }
+
+  :focus-visible {
+    @apply outline outline-2 outline-offset-2 outline-teal-500;
+  }
+
+  ::selection {
+    background: rgba(20, 184, 166, 0.22);
+  }
 }
 
-body {
-  font-family: 'DM Sans', sans-serif;
-  background: #0f172a;
-  color: #f1f5f9;
+@layer components {
+  .card {
+    @apply rounded-2xl border border-line bg-white shadow-soft;
+  }
+
+  .btn {
+    @apply inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-sm font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-50;
+  }
+
+  .btn-primary {
+    @apply btn bg-forest-800 text-white hover:bg-forest-700;
+  }
+
+  .btn-accent {
+    @apply btn bg-ember-500 text-ink hover:bg-ember-100;
+  }
+
+  .btn-secondary {
+    @apply btn border border-line bg-white text-ink hover:border-forest-200 hover:bg-forest-50;
+  }
+
+  .btn-ghost {
+    @apply btn text-ink-soft hover:bg-forest-50 hover:text-forest-800;
+  }
+
+  .btn-danger {
+    @apply btn bg-red-700 text-white hover:bg-red-800;
+  }
+
+  .icon-btn {
+    @apply inline-flex h-9 w-9 flex-shrink-0 items-center justify-center rounded-full transition-colors disabled:cursor-not-allowed disabled:opacity-50;
+  }
+
+  .input {
+    @apply w-full rounded-xl border border-line bg-white px-3.5 py-2.5 text-sm text-ink placeholder-ink-mute transition-colors focus:border-teal-500 focus:outline-none focus:ring-2 focus:ring-teal-500/20;
+  }
+
+  .label {
+    @apply mb-1.5 block text-sm font-semibold text-ink;
+  }
+
+  .chip {
+    @apply inline-flex items-center gap-1.5 rounded-full border border-line bg-white px-3.5 py-1.5 text-sm font-medium text-ink-soft transition-colors hover:border-forest-200 hover:text-forest-800;
+  }
+
+  .chip-active {
+    @apply border-forest-800 bg-forest-800 text-white hover:border-forest-800 hover:text-white;
+  }
+
+  .eyebrow {
+    @apply text-xs font-bold uppercase tracking-widest text-forest-500;
+  }
+
+  .skeleton {
+    @apply animate-pulse rounded-lg bg-forest-100/70;
+  }
 }
 
-.gradient-hero {
-  background: linear-gradient(135deg, #0f172a 0%, #1e293b 50%, #0f172a 100%);
+.page-enter {
+  animation: page-enter 0.22s ease-out;
 }
 
-.card {
-  background: rgba(30, 41, 59, 0.8);
-  border: 1px solid rgba(148, 163, 184, 0.1);
-  backdrop-filter: blur(10px);
+@keyframes page-enter {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
 }
 
-.btn-primary {
-  background: linear-gradient(135deg, #f97316, #ea580c);
-  color: white;
-  font-weight: 600;
-  transition: all 0.2s;
+dialog::backdrop {
+  background: rgba(15, 58, 44, 0.45);
 }
 
-.btn-primary:hover {
-  transform: translateY(-1px);
-  box-shadow: 0 10px 25px rgba(249, 115, 22, 0.3);
+/* Leaflet */
+.leaflet-container {
+  font-family: inherit;
 }
 
-.interest-tag {
-  border: 1px solid rgba(249, 115, 22, 0.3);
-  transition: all 0.15s;
-  cursor: pointer;
+.leaflet-popup-content-wrapper {
+  border-radius: 14px;
+  box-shadow: 0 10px 30px rgba(22, 78, 59, 0.2);
 }
 
-.interest-tag.selected {
-  background: rgba(249, 115, 22, 0.2);
-  border-color: #f97316;
-  color: #f97316;
+.leaflet-popup-content {
+  margin: 12px 14px;
+  font-size: 13px;
+  line-height: 1.45;
 }
 
-.timeline-dot {
-  width: 12px;
-  height: 12px;
-  background: #f97316;
-  border-radius: 50%;
-  border: 2px solid #0f172a;
-  box-shadow: 0 0 0 3px rgba(249, 115, 22, 0.3);
-}
-
-.timeline-line {
-  width: 2px;
-  background: linear-gradient(180deg, #f97316, #14b8a6);
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }

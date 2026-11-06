@@ -4,7 +4,7 @@ from datetime import datetime, timedelta
 from typing import Optional
 import math
 
-from ml.optimizer.route_optimizer import optimize_day_route
+from ml.optimizer.route_optimizer import optimize_day_route, haversine_distance
 
 LUNCH_TIME = "12:30"
 DINNER_TIME = "19:30"
@@ -27,6 +27,22 @@ def _is_food_venue(attraction: dict) -> bool:
     name = str(attraction.get("name", "")).lower().strip()
     return any(f in category for f in FOOD_CATEGORIES) or any(
         f in name for f in {"cafe", "coffee", "bistro", "bakery"}
+    )
+
+
+def _coord(stop: dict) -> Optional[tuple[float, float]]:
+    """A stop's (lat, lon), or None when it has no usable coordinates."""
+    lat, lon = stop.get("latitude"), stop.get("longitude")
+    if lat is None or lon is None or pd.isna(lat) or pd.isna(lon):
+        return None
+    return float(lat), float(lon)
+
+
+def _route_distance_km(day_attractions: list[dict]) -> float:
+    """Straight-line km along the day's stops, in visiting order."""
+    points = [c for c in map(_coord, day_attractions) if c]
+    return round(
+        sum(haversine_distance(a, b) for a, b in zip(points, points[1:])), 2
     )
 
 
@@ -69,6 +85,7 @@ class DayScheduler:
         meal_type: str,
         day_offset: int,
         exclude_names=None,
+        near: Optional[tuple[float, float]] = None,
     ) -> Optional[dict]:
 
         if restaurants is None or len(restaurants) == 0:
@@ -92,7 +109,7 @@ class DayScheduler:
         if "rating" in city_df.columns:
             city_df = city_df.sort_values("rating", ascending=False)
 
-        if exclude_names:
+        if exclude_names and len(city_df) > 0:
             city_df = city_df[
                 ~city_df.apply(
                     lambda r: str(
@@ -107,6 +124,14 @@ class DayScheduler:
         records = city_df.to_dict("records")
         if not records:
             return None
+
+        # Live restaurants have no rating to rank by, so prefer the closest.
+        if near and "cost_is_estimate" in city_df.columns:
+            return min(
+                records,
+                key=lambda r: (r["latitude"] - near[0]) ** 2
+                + (r["longitude"] - near[1]) ** 2,
+            )
 
         index = (day_offset * 3) % len(records)
         return records[index]
@@ -140,6 +165,8 @@ class DayScheduler:
             "latitude": row.get("latitude"),
             "longitude": row.get("longitude"),
             "interest_tags": str(row.get("interest_tags_str", "")).split("|"),
+            "semantic_score": row.get("semantic_score"),
+            "placeholder_metrics": bool(row.get("placeholder_metrics", False)),
         }
 
     def _partition_attractions(
@@ -262,8 +289,9 @@ class DayScheduler:
                         "visit_duration_hours": 1.5,
                         "entrance_fee": 0,
                         "rating": cafe.get("rating", 4.0),
-                        "latitude": None,
-                        "longitude": None,
+                        "latitude": cafe.get("latitude"),
+                        "longitude": cafe.get("longitude"),
+                        "placeholder_metrics": bool(cafe.get("cost_is_estimate", False)),
                     })
 
                 day_type = "leisure"
@@ -282,8 +310,11 @@ class DayScheduler:
                 day_type = "relaxed" if has_cafe else "tourist"
                 day_title = f"Day {day_num} — {city}"
 
+            stops = [c for c in map(_coord, day_list) if c]
+
             lunch = self._select_restaurant(
-                restaurants, city, max_lunch, "lunch", day_idx, used_names
+                restaurants, city, max_lunch, "lunch", day_idx, used_names,
+                near=stops[(len(stops) - 1) // 2] if stops else None,
             )
 
             if lunch:
@@ -292,8 +323,14 @@ class DayScheduler:
                 )
 
             dinner = self._select_restaurant(
-                restaurants, city, max_dinner, "dinner", day_num, used_names
+                restaurants, city, max_dinner, "dinner", day_num, used_names,
+                near=stops[-1] if stops else None,
             )
+
+            if dinner:
+                used_names.add(
+                    (dinner.get("name") or dinner.get("restaurant_name") or "").lower()
+                )
 
             actual_cost, utilization = self._compute_day_budget(
                 day_list, lunch, dinner, budget_per_day_inr
@@ -309,7 +346,7 @@ class DayScheduler:
                 "day_budget_actual": actual_cost,
                 "day_budget_limit": budget_per_day_inr,
                 "budget_utilization_pct": utilization,
-                "total_distance_km": 0,
+                "total_distance_km": _route_distance_km(day_list),
             })
 
         return itinerary

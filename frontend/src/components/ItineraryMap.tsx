@@ -1,198 +1,261 @@
-// frontend/src/components/ItineraryMap.tsx
-// CHANGES:
-//   1. Removed the Bangalore fallback coordinate assignment inside forEach.
-//      Attractions without valid coords are now skipped entirely.
-//   2. Added a guard so the map never renders with zero markers
-//      (shows a placeholder message instead).
-//   All other logic is identical to your current file.
-
-import React, { useEffect, useRef } from 'react';
-import {
-  MapContainer,
-  TileLayer,
-  Marker,
-  Popup,
-  Polyline,
-  Tooltip,
-  useMap,
-} from 'react-leaflet';
+import { useEffect, useRef } from 'react';
+import { MapContainer, Marker, Polyline, Popup, Tooltip, useMap } from 'react-leaflet';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
-import type { DayItinerary, Attraction } from '../types';
+import { MapPinOff } from 'lucide-react';
+import type { DayItinerary, Restaurant } from '../types';
+import {
+  feeLabel,
+  hasCoord,
+  hasRealRating,
+  inr,
+  mealCost,
+  placeUrl,
+  stopKey,
+} from '../lib/format';
+import { BaseTiles, FitBounds } from './MapHelpers';
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-delete (L.Icon.Default.prototype as any)._getIconUrl;
-L.Icon.Default.mergeOptions({
-  iconRetinaUrl:
-    'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-icon-2x.png',
-  iconUrl:
-    'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-icon.png',
-  shadowUrl:
-    'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-shadow.png',
-});
+const ROUTE_COLOR = '#164E3B';
 
-const COLORS = {
-  routes: ['#f97316', '#14b8a6', '#8b5cf6'],
-};
-
-function isValidCoord(lat: unknown, lng: unknown): boolean {
-  const la = Number(lat);
-  const lo = Number(lng);
-  return (
-    isFinite(la) && isFinite(lo)
-    && la !== 0 && lo !== 0
-    && la >= -90 && la <= 90
-    && lo >= -180 && lo <= 180
-  );
-}
-
-function createPin(number: number, color: string): L.DivIcon {
+function stopIcon(number: number, active: boolean): L.DivIcon {
+  const size = active ? 38 : 30;
   return L.divIcon({
     className: '',
     html: `<div style="
-      background:${color};color:white;width:28px;height:28px;
-      border-radius:50%;display:flex;align-items:center;
-      justify-content:center;font-weight:bold;border:2px solid white;
+      width:${size}px;height:${size}px;border-radius:50%;
+      background:${active ? '#14B8A6' : ROUTE_COLOR};color:#fff;
+      display:flex;align-items:center;justify-content:center;
+      font-weight:700;font-size:${active ? 15 : 13}px;
+      border:3px solid #fff;box-shadow:0 3px 10px rgba(15,58,44,.4);
     ">${number}</div>`,
-    iconSize: [28, 28],
-    iconAnchor: [14, 28],
+    iconSize: [size, size],
+    iconAnchor: [size / 2, size / 2],
+    popupAnchor: [0, -size / 2],
   });
 }
 
-function MapBounds({ coords }: { coords: [number, number][] }) {
-  const map  = useMap();
-  const prev = useRef('');
+function mealIcon(kind: 'lunch' | 'dinner', active: boolean): L.DivIcon {
+  const size = active ? 34 : 28;
+  const lunch = kind === 'lunch';
+  return L.divIcon({
+    className: '',
+    html: `<div style="
+      width:${size}px;height:${size}px;border-radius:9px;
+      background:${lunch ? '#F28C45' : '#1E2925'};color:${lunch ? '#1E2925' : '#fff'};
+      display:flex;align-items:center;justify-content:center;
+      font-weight:800;font-size:12px;
+      border:2px solid #fff;box-shadow:0 3px 10px rgba(15,58,44,.4);
+    ">${lunch ? 'L' : 'D'}</div>`,
+    iconSize: [size, size],
+    iconAnchor: [size / 2, size / 2],
+    popupAnchor: [0, -size / 2],
+  });
+}
+
+/** Pans to the selected marker and opens its popup. */
+function FocusSelected({
+  selected,
+  markers,
+}: {
+  selected: string | null;
+  markers: React.RefObject<Map<string, L.Marker>>;
+}) {
+  const map = useMap();
+
   useEffect(() => {
-    if (coords.length === 0) return;
-    const key = coords.map(c => c.join(',')).join('|');
-    if (key === prev.current) return;
-    prev.current = key;
-    map.fitBounds(L.latLngBounds(coords), { padding: [40, 40], maxZoom: 15 });
-  }, [coords, map]);
+    const marker = selected ? markers.current.get(selected) : undefined;
+    if (!marker) return;
+    map.panTo(marker.getLatLng());
+    marker.openPopup();
+  }, [selected, markers, map]);
+
   return null;
 }
 
-export default function ItineraryMap({
-  days,
-  activeDay,
+function MealMarker({
+  kind,
+  meal,
+  dayNumber,
+  selected,
+  onSelect,
+  register,
 }: {
-  days: DayItinerary[];
-  activeDay: number;
+  kind: 'lunch' | 'dinner';
+  meal: Restaurant;
+  dayNumber: number;
+  selected: string | null;
+  onSelect: (key: string) => void;
+  register: (key: string, marker: L.Marker | null) => void;
 }) {
-  const day        = days[activeDay - 1];
-  const routeColor = COLORS.routes[(activeDay - 1) % COLORS.routes.length];
+  const key = `${dayNumber}:${kind}`;
+  const cost = mealCost(meal);
+  const label = kind === 'lunch' ? 'Lunch' : 'Dinner';
 
-  // ── Build validated entries — NO fallback coordinates ─────────────────
-  // If an attraction has invalid or missing coordinates it is skipped.
-  // The Geoapify pipeline guarantees coordinates are valid before they
-  // reach here, so this is purely a defensive guard.
-  const validEntries: {
-    attraction: Attraction;
-    coord: [number, number];
-    originalIndex: number;
-  }[] = [];
+  return (
+    <Marker
+      ref={marker => register(key, marker)}
+      position={[Number(meal.latitude), Number(meal.longitude)]}
+      icon={mealIcon(kind, selected === key)}
+      eventHandlers={{ click: () => onSelect(key) }}
+    >
+      <Tooltip direction="top" offset={[0, -14]}>
+        {label}: {meal.restaurant_name}
+      </Tooltip>
+      <Popup>
+        <strong>{meal.restaurant_name}</strong>
+        <br />
+        {label}
+        {meal.cuisine ? ` · ${meal.cuisine}` : ''}
+        {cost !== null && (
+          <>
+            <br />
+            {meal.cost_is_estimate ? `About ${inr(cost)}` : inr(cost)} per person
+          </>
+        )}
+        <br />
+        <a href={placeUrl(meal.restaurant_name ?? '', meal)} target="_blank" rel="noreferrer">
+          Open in Google Maps
+        </a>
+      </Popup>
+    </Marker>
+  );
+}
 
-  if (day) {
-    day.attractions.forEach((attraction, idx) => {
-      if (!isValidCoord(attraction.latitude, attraction.longitude)) {
-        // ── CHANGE: skip instead of substituting Bangalore coords ──────
-        console.warn(
-          `[ItineraryMap] Skipping "${attraction.name}" — invalid coordinates`,
-          { lat: attraction.latitude, lng: attraction.longitude }
-        );
-        return;
-      }
-      validEntries.push({
-        attraction,
-        coord: [Number(attraction.latitude), Number(attraction.longitude)],
-        originalIndex: idx + 1,
-      });
-    });
-  }
+export default function ItineraryMap({
+  day,
+  selected,
+  onSelect,
+}: {
+  day: DayItinerary;
+  selected: string | null;
+  onSelect: (key: string) => void;
+}) {
+  const markers = useRef(new Map<string, L.Marker>());
 
-  const coords = validEntries.map(e => e.coord);
+  const register = (key: string, marker: L.Marker | null) => {
+    if (marker) markers.current.set(key, marker);
+    else markers.current.delete(key);
+  };
 
-  // ── Guard: show a message when the day has no plottable attractions ───
-  if (coords.length === 0) {
+  // Stops without valid coordinates are skipped, never given fallback ones.
+  // Numbers still come from the visiting order so they match the itinerary.
+  const stops = day.attractions
+    .map((attraction, index) => ({ attraction, number: index + 1 }))
+    .filter(({ attraction }) => hasCoord(attraction));
+
+  const route = stops.map(({ attraction }): [number, number] => [
+    Number(attraction.latitude),
+    Number(attraction.longitude),
+  ]);
+
+  const lunch = day.lunch && hasCoord(day.lunch) ? day.lunch : null;
+  const dinner = day.dinner && hasCoord(day.dinner) ? day.dinner : null;
+
+  const allPoints = [
+    ...route,
+    ...[lunch, dinner].flatMap((meal): [number, number][] =>
+      meal ? [[Number(meal.latitude), Number(meal.longitude)]] : []
+    ),
+  ];
+
+  if (allPoints.length === 0) {
     return (
-      <div
-        style={{
-          height: '500px',
-          borderRadius: '16px',
-          background: '#1e293b',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          color: '#94a3b8',
-          fontSize: '14px',
-        }}
-      >
-        No map data available for this day.
+      <div className="flex h-full min-h-[420px] flex-col items-center justify-center gap-2 bg-forest-50 text-sm text-ink-soft">
+        <MapPinOff size={24} />
+        No map locations are available for this day.
       </div>
     );
   }
 
-  // First valid coord is the map centre — fitBounds will adjust zoom anyway.
-  const center: [number, number] = coords[0];
-
   return (
-    <div style={{ height: '500px', borderRadius: '16px', overflow: 'hidden' }}>
+    <div className="relative h-full min-h-[420px]">
       <MapContainer
-        key={activeDay}
-        center={center}
+        center={allPoints[0]}
         zoom={13}
-        style={{ height: '100%' }}
+        className="h-full w-full"
+        style={{ minHeight: 420 }}
       >
-        <TileLayer
-  url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-  attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-/>
-          
+        <BaseTiles />
+        <FitBounds coords={allPoints} />
+        <FocusSelected selected={selected} markers={markers} />
 
-        <MapBounds coords={coords} />
-
-        {coords.length > 1 && (
+        {route.length > 1 && (
           <Polyline
-            positions={coords}
-            pathOptions={{ color: routeColor, weight: 4 }}
+            positions={route}
+            pathOptions={{ color: ROUTE_COLOR, weight: 4, opacity: 0.85 }}
           />
         )}
 
-        {validEntries.map(entry => (
-          <Marker
-            key={entry.originalIndex}
-            position={entry.coord}
-            icon={createPin(entry.originalIndex, routeColor)}
-          >
-            <Tooltip direction="top" offset={[0, -16]}>
-              {entry.attraction.name}
-            </Tooltip>
-            <Popup>
-              <strong>{entry.attraction.name}</strong>
-              <br />
-              {entry.attraction.category}
-              <br />
-              ⭐ {entry.attraction.rating}
-            </Popup>
-          </Marker>
-        ))}
+        {stops.map(({ attraction, number }) => {
+          const key = stopKey(day.day, attraction);
+          return (
+            <Marker
+              key={key}
+              ref={marker => register(key, marker)}
+              position={[Number(attraction.latitude), Number(attraction.longitude)]}
+              icon={stopIcon(number, selected === key)}
+              zIndexOffset={selected === key ? 500 : 100}
+              eventHandlers={{ click: () => onSelect(key) }}
+            >
+              <Tooltip direction="top" offset={[0, -14]}>
+                {number}. {attraction.name}
+              </Tooltip>
+              <Popup>
+                <strong>{attraction.name}</strong>
+                <br />
+                {attraction.category}
+                {attraction.start_time && ` · ${attraction.start_time}–${attraction.end_time}`}
+                <br />
+                {attraction.visit_duration_hours} h · {feeLabel(attraction)}
+                {hasRealRating(attraction.rating, attraction.placeholder_metrics) &&
+                  ` · ★ ${attraction.rating.toFixed(1)}`}
+                <br />
+                <a href={placeUrl(attraction.name, attraction)} target="_blank" rel="noreferrer">
+                  Open in Google Maps
+                </a>
+              </Popup>
+            </Marker>
+          );
+        })}
 
-        {day?.lunch && isValidCoord(day.lunch.latitude, day.lunch.longitude) && (
-          <Marker
-            position={[day.lunch.latitude!, day.lunch.longitude!]}
-          >
-            <Popup>🍽 Lunch: {day.lunch.restaurant_name}</Popup>
-          </Marker>
+        {lunch && (
+          <MealMarker
+            key={`${day.day}-lunch`}
+            kind="lunch"
+            meal={lunch}
+            dayNumber={day.day}
+            selected={selected}
+            onSelect={onSelect}
+            register={register}
+          />
         )}
-
-        {day?.dinner && isValidCoord(day.dinner.latitude, day.dinner.longitude) && (
-          <Marker
-            position={[day.dinner.latitude!, day.dinner.longitude!]}
-          >
-            <Popup>🌙 Dinner: {day.dinner.restaurant_name}</Popup>
-          </Marker>
+        {dinner && (
+          <MealMarker
+            key={`${day.day}-dinner`}
+            kind="dinner"
+            meal={dinner}
+            dayNumber={day.day}
+            selected={selected}
+            onSelect={onSelect}
+            register={register}
+          />
         )}
       </MapContainer>
+
+      <ul
+        aria-label="Map legend"
+        className="pointer-events-none absolute bottom-6 left-3 z-[900] space-y-1 rounded-xl bg-white/95 px-3 py-2 text-xs font-medium text-ink shadow-soft"
+      >
+        <li className="flex items-center gap-2">
+          <span className="h-3.5 w-3.5 rounded-full bg-forest-800" /> Attraction
+        </li>
+        <li className="flex items-center gap-2">
+          <span className="h-3.5 w-3.5 rounded bg-ember-500" /> Lunch
+        </li>
+        <li className="flex items-center gap-2">
+          <span className="h-3.5 w-3.5 rounded bg-ink" /> Dinner
+        </li>
+      </ul>
     </div>
   );
 }

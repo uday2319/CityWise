@@ -4,6 +4,7 @@ export interface ItineraryRequest {
   budget_per_day_inr: number;       // e.g. 3000.0 — exact INR per day
   preference_text: string;          // natural language, encoded live by SBERT
   max_total_budget_inr?: number;    // optional hard total cap
+  exclude_places?: string[];        // names to avoid when regenerating
 }
 
 export interface BudgetAllocation {
@@ -22,30 +23,32 @@ export interface Attraction {
   visit_duration_hours: number;
   entrance_fee: number;
   rating: number;
-  latitude?: number;
-  longitude?: number;
-  start_time?: string;
-  end_time?: string;
+  latitude?: number | null;
+  longitude?: number | null;
+  start_time?: string | null;
+  end_time?: string | null;
   interest_tags: string[];
-  semantic_score?: number;          // SBERT similarity score (0–1)
+  semantic_score?: number | null;   // SBERT similarity score (0–1)
+  placeholder_metrics?: boolean;    // rating and fee are defaults, not data
 }
 
 export interface Restaurant {
-  restaurant_name?: string;
-  cuisine?: string;
-  rating?: number;
-  cost_for_two?: number;
-  area?: string;
-  latitude?: number;
-  longitude?: number;
+  restaurant_name?: string | null;
+  cuisine?: string | null;
+  rating?: number | null;
+  cost_for_two?: number | null;
+  area?: string | null;
+  latitude?: number | null;
+  longitude?: number | null;
+  cost_is_estimate?: boolean;       // cost_for_two is assumed, not data
 }
 
 export interface DayItinerary {
   day: number;
   title: string;
   attractions: Attraction[];
-  lunch?: Restaurant;
-  dinner?: Restaurant;
+  lunch?: Restaurant | null;
+  dinner?: Restaurant | null;
   day_budget_actual: number;        // computed actual cost
   day_budget_limit: number;         // budget_per_day_inr constraint
   budget_utilization_pct: number;   // actual / limit × 100
@@ -53,7 +56,7 @@ export interface DayItinerary {
 }
 
 export interface ItineraryResponse {
-  id?: number;
+  id?: number | null;
   session_id: string;
   city: string;
   duration_days: number;
@@ -84,4 +87,65 @@ export interface BudgetSummary {
     budget_utilization_pct: number;
   }>;
   budget_allocation: BudgetAllocation;
+}
+
+export interface ExplorePlace {
+  id: string;
+  name: string;
+  category: string;
+  city: string;
+  latitude: number;
+  longitude: number;
+  address?: string | null;
+  website?: string | null;
+  opening_hours?: string | null;
+  visit_duration_hours: number;
+  rating?: number | null;
+}
+
+export interface PlacePhoto {
+  found: boolean;
+  url?: string;
+  title?: string;
+  description?: string | null;
+  source_url?: string;
+}
+
+export interface Weather {
+  temperature_c: number;
+  feels_like_c: number;
+  humidity_pct: number;
+  wind_kmh: number;
+  condition: string;
+  weather_code: number;
+  high_c: number;
+  low_c: number;
+}
+
+export interface TranslationResult {
+  translated_text: string;
+  provider: string;
+  confidence: number | null;
+  warning: string | null;
+}
+
+/** An itinerary plus everything the app remembers about it. */
+export interface Trip {
+  id: string;
+  name: string;
+  request: ItineraryRequest;
+  itinerary: ItineraryResponse;
+  travellers: number;
+  saved: boolean;
+  startDate?: string;               // yyyy-mm-dd
+  visited: string[];                // stop keys ticked off by the traveller
+}
+
+export interface Profile {
+  name: string;
+  homeCity: string;
+  travelStyle: string;
+  sourceLanguage: string;
+  targetLanguage: string;
+  savedDestinations: string[];
 }

@@ -45,6 +45,7 @@ def _format_restaurant(rest_dict: Optional[dict]) -> Optional[RestaurantResponse
         area=rest_dict.get("area", ""),
         latitude=rest_dict.get("latitude"),
         longitude=rest_dict.get("longitude"),
+        cost_is_estimate=bool(rest_dict.get("cost_is_estimate", False)),
     )
 
 
@@ -74,6 +75,7 @@ def _format_itinerary_response(
                 end_time=a.get("end_time"),
                 interest_tags=a.get("interest_tags", []),
                 semantic_score=a.get("semantic_score"),
+                placeholder_metrics=bool(a.get("placeholder_metrics", False)),
             )
             for a in day_data.get("attractions", [])
         ]
@@ -134,6 +136,7 @@ async def generate_itinerary(
             budget_per_day_inr=effective_budget,
             preference_text=request_data.preference_text,
             max_total_budget_inr=request_data.max_total_budget_inr,
+            exclude_places=request_data.exclude_places,
         )
     except ValueError as e:
         raise HTTPException(status_code=404, detail=str(e))

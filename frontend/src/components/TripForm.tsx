@@ -1,376 +1,255 @@
-import React, { useState, useCallback } from 'react';
-import {
-  MapPin,
-  Calendar,
-  IndianRupee,
-  MessageSquare,
-  Info,
-} from 'lucide-react';
+import { useState, type FormEvent } from 'react';
+import { Info, Minus, Plus, Sparkles } from 'lucide-react';
 import type { ItineraryRequest } from '../types';
+import { BUDGET_PRESETS, INTERESTS } from '../lib/catalog';
+import { inr } from '../lib/format';
+import CityInput from './CityInput';
 
-// ── Budget preset chips ────────────────────────────────────────────────────
-interface BudgetPreset {
-  label: string;
-  value: number;
-  description: string;
-}
+const MIN_BUDGET = 500;
+const MAX_BUDGET = 100000;
+const MAX_DAYS = 14;              // matches ItineraryRequest.duration_days
 
-const BUDGET_PRESETS: BudgetPreset[] = [
-  { label: '₹1,000',  value: 1000,  description: 'Backpacker' },
-  { label: '₹2,000',  value: 2000,  description: 'Budget' },
-  { label: '₹3,500',  value: 3500,  description: 'Comfortable' },
-  { label: '₹6,000',  value: 6000,  description: 'Premium' },
-  { label: '₹10,000', value: 10000, description: 'Luxury' },
-];
-
-// ── Example preference prompts ────────────────────────────────────────────
 const EXAMPLE_PROMPTS = [
   'I love ancient forts and local street food markets',
   'Peaceful nature spots and cozy cafes with a relaxed vibe',
-  'Historical monuments and cultural experiences, vegetarian food',
-  'Adventure activities, scenic viewpoints, and wildlife',
-  'Spiritual temples and traditional bazaars for shopping',
   'Art galleries, colonial architecture, and fine dining',
 ];
 
-const POPULAR_CITIES = [
-  'Delhi', 'Mumbai', 'Jaipur', 'Goa',
-  'Agra', 'Varanasi', 'Udaipur', 'Bangalore',
-];
-
-// ── Budget label helper (mirrors BudgetAllocation.label() on backend) ─────
-function getBudgetLabel(amount: number): string {
+// Mirrors BudgetAllocation.label() on the backend.
+function budgetLabel(amount: number): string {
   if (amount < 1500) return 'Budget Traveller';
   if (amount < 3500) return 'Comfortable Travel';
   if (amount < 8000) return 'Premium Experience';
   return 'Luxury Travel';
 }
 
-// ── Budget allocation preview ─────────────────────────────────────────────
 function BudgetPreview({ budget }: { budget: number }) {
-  if (budget <= 0) return null;
-
-  const maxFee     = Math.round(budget * 0.25);
-  const maxLunch   = Math.round(budget * 0.40);
-  const maxDinner  = Math.round(budget * 0.50);
-  const transport  = Math.round(budget * 0.15);
-  const label      = getBudgetLabel(budget);
+  const rows = [
+    ['Attraction fee', `up to ${inr(budget * 0.25)}`],
+    ['Lunch for two', `up to ${inr(budget * 0.4)}`],
+    ['Dinner for two', `up to ${inr(budget * 0.5)}`],
+    ['Local transport', inr(budget * 0.15)],
+  ];
 
   return (
-    <div className="mt-3 bg-slate-800/60 border border-slate-700 rounded-xl p-3 space-y-1.5">
-      <div className="flex items-center gap-1.5 mb-2">
-        <Info size={12} className="text-teal-400" />
-        <span className="text-xs text-teal-400 font-semibold">
-          {label} — Budget breakdown for ₹{budget.toLocaleString('en-IN')}/day
-        </span>
-      </div>
-      <div className="grid grid-cols-2 gap-x-4 gap-y-1">
-        <div className="flex justify-between text-xs">
-          <span className="text-slate-400">Max attraction fee</span>
-          <span className="text-white font-medium">≤ ₹{maxFee.toLocaleString('en-IN')}</span>
-        </div>
-        <div className="flex justify-between text-xs">
-          <span className="text-slate-400">Max lunch (for 2)</span>
-          <span className="text-white font-medium">≤ ₹{maxLunch.toLocaleString('en-IN')}</span>
-        </div>
-        <div className="flex justify-between text-xs">
-          <span className="text-slate-400">Max dinner (for 2)</span>
-          <span className="text-white font-medium">≤ ₹{maxDinner.toLocaleString('en-IN')}</span>
-        </div>
-        <div className="flex justify-between text-xs">
-          <span className="text-slate-400">Transport buffer</span>
-          <span className="text-white font-medium">₹{transport.toLocaleString('en-IN')}</span>
-        </div>
-      </div>
+    <div className="mt-3 rounded-xl bg-forest-50 p-3">
+      <p className="mb-2 flex items-center gap-1.5 text-xs font-bold text-forest-800">
+        <Info size={13} /> {budgetLabel(budget)}: how {inr(budget)} a day is used
+      </p>
+      <dl className="grid gap-x-5 gap-y-1 text-xs sm:grid-cols-2">
+        {rows.map(([label, value]) => (
+          <div key={label} className="flex justify-between">
+            <dt className="text-ink-soft">{label}</dt>
+            <dd className="font-semibold">{value}</dd>
+          </div>
+        ))}
+      </dl>
     </div>
   );
 }
 
-interface Props {
-  onSubmit: (req: ItineraryRequest) => void;
-  loading: boolean;
+export interface TripFormValues {
+  city?: string;
+  days?: number;
+  budget?: number;
+  travellers?: number;
+  interests?: string[];
+  preference?: string;
 }
 
-export default function TripForm({ onSubmit, loading }: Props) {
-  const [city, setCity]                     = useState('');
-  const [days, setDays]                     = useState(3);
-  const [budgetPerDay, setBudgetPerDay]     = useState<number>(3000);
-  const [budgetInput, setBudgetInput]       = useState<string>('3000');
-  const [preferenceText, setPreferenceText] = useState('');
-  const [citySuggestions, setCitySuggestions] = useState<string[]>([]);
-  const [showSuggestions, setShowSuggestions] = useState(false);
+interface Props {
+  initial: TripFormValues;
+  loading: boolean;
+  onSubmit: (request: ItineraryRequest, travellers: number) => void;
+}
 
-  const fetchCitySuggestions = useCallback(async (q: string) => {
-    if (q.length < 2) { setCitySuggestions([]); return; }
-    try {
-      const res  = await fetch(
-        `http://localhost:8000/api/v1/cities/search?q=${encodeURIComponent(q)}`
-      );
-      const data = await res.json();
-      setCitySuggestions(data.cities || []);
-      setShowSuggestions(true);
-    } catch {
-      setCitySuggestions([]);
-    }
-  }, []);
+export default function TripForm({ initial, loading, onSubmit }: Props) {
+  const [city, setCity] = useState(initial.city ?? '');
+  const [days, setDays] = useState(initial.days ?? 3);
+  const [budgetInput, setBudgetInput] = useState(String(initial.budget ?? 3000));
+  const [travellers, setTravellers] = useState(initial.travellers ?? 1);
+  const [interests, setInterests] = useState<string[]>(initial.interests ?? []);
+  const [preference, setPreference] = useState(initial.preference ?? '');
 
-  const handleBudgetInput = (raw: string) => {
-    setBudgetInput(raw);
-    const parsed = parseFloat(raw.replace(/,/g, ''));
-    if (!isNaN(parsed) && parsed > 0) {
-      setBudgetPerDay(parsed);
-    }
+  const budget = Number(budgetInput) || 0;
+  const budgetValid = budget >= MIN_BUDGET && budget <= MAX_BUDGET;
+
+  // Interests join the free text, so the SBERT pipeline sees a single sentence.
+  const chosen = INTERESTS.filter(interest => interests.includes(interest.key));
+  const preferenceText = [
+    preference.trim(),
+    chosen.length ? `Interested in ${chosen.map(i => i.phrase).join(', ')}` : '',
+  ].filter(Boolean).join('. ');
+
+  const isValid =
+    city.trim().length >= 2 && budgetValid && preferenceText.length >= 5;
+
+  const toggleInterest = (key: string) =>
+    setInterests(current =>
+      current.includes(key)
+        ? current.filter(item => item !== key)
+        : [...current, key]
+    );
+
+  const handleSubmit = (event: FormEvent) => {
+    event.preventDefault();
+    if (!isValid) return;
+    onSubmit(
+      {
+        city: city.trim(),
+        duration_days: days,
+        budget_per_day_inr: budget,
+        preference_text: preferenceText,
+      },
+      travellers
+    );
   };
-
-  const handlePresetClick = (value: number) => {
-    setBudgetPerDay(value);
-    setBudgetInput(String(value));
-  };
-
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!city || preferenceText.trim().length < 5 || budgetPerDay < 500) return;
-    onSubmit({
-      city,
-      duration_days: days,
-      budget_per_day_inr: budgetPerDay,
-      preference_text: preferenceText.trim(),
-    });
-  };
-
-  const charCount = preferenceText.length;
-  const isValid   =
-    city.trim().length >= 2 &&
-    preferenceText.trim().length >= 5 &&
-    budgetPerDay >= 500;
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-7">
+    <form onSubmit={handleSubmit} className="space-y-6">
+      <CityInput value={city} onChange={setCity} required />
 
-      {/* ── City Input ──────────────────────────────────────────────────── */}
-      <div className="relative">
-        <label className="flex items-center gap-2 text-sm font-medium text-slate-400 mb-2">
-          <MapPin size={16} className="text-saffron-500" />
-          Destination City
-        </label>
-        <input
-          type="text"
-          value={city}
-          onChange={e => {
-            setCity(e.target.value);
-            fetchCitySuggestions(e.target.value);
-          }}
-          onFocus={() => city.length > 1 && setShowSuggestions(true)}
-          onBlur={() => setTimeout(() => setShowSuggestions(false), 200)}
-          placeholder="e.g. Delhi, Jaipur, Mumbai..."
-          className="w-full bg-slate-800 border border-slate-600 rounded-xl px-4 py-3 text-white placeholder-slate-500 focus:outline-none focus:border-saffron-500 transition-colors"
-          required
-        />
-        {showSuggestions && citySuggestions.length > 0 && (
-          <div className="absolute z-10 w-full mt-1 bg-slate-800 border border-slate-600 rounded-xl shadow-2xl">
-            {citySuggestions.map(c => (
-              <button
-                key={c}
-                type="button"
-                onClick={() => { setCity(c); setShowSuggestions(false); }}
-                className="w-full px-4 py-2.5 text-left text-slate-300 hover:bg-slate-700 first:rounded-t-xl last:rounded-b-xl transition-colors"
-              >
-                {c}
-              </button>
-            ))}
-          </div>
-        )}
-        <div className="flex flex-wrap gap-2 mt-3">
-          {POPULAR_CITIES.map(c => (
-            <button
-              key={c}
-              type="button"
-              onClick={() => setCity(c)}
-              className={`px-3 py-1 rounded-full text-xs border transition-colors ${
-                city === c
-                  ? 'bg-saffron-500/20 border-saffron-500 text-saffron-400'
-                  : 'border-slate-600 text-slate-400 hover:border-slate-400'
-              }`}
-            >
-              {c}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      {/* ── Duration ────────────────────────────────────────────────────── */}
-      <div>
-        <label className="flex items-center gap-2 text-sm font-medium text-slate-400 mb-2">
-          <Calendar size={16} className="text-saffron-500" />
-          Duration:{' '}
-          <span className="text-white font-semibold ml-1">
-            {days} {days === 1 ? 'day' : 'days'}
-          </span>
-        </label>
-        <input
-          type="range"
-          min={1}
-          max={10}
-          value={days}
-          onChange={e => setDays(Number(e.target.value))}
-          className="w-full accent-orange-500"
-        />
-        <div className="flex justify-between text-xs text-slate-500 mt-1">
-          <span>1 day</span>
-          <span>5 days</span>
-          <span>10 days</span>
-        </div>
-      </div>
-
-      {/* ── Budget Per Day — NUMERIC INR INPUT (v2 change) ─────────────── */}
-      <div>
-        <label className="flex items-center gap-2 text-sm font-medium text-slate-400 mb-2">
-          <IndianRupee size={16} className="text-saffron-500" />
-          Daily Budget
-          <span className="text-slate-600 text-xs font-normal ml-1">
-            (per person per day, in ₹ INR)
-          </span>
-        </label>
-
-        {/* Numeric text input */}
-        <div className="relative">
-          <span className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 font-medium select-none">
-            ₹
-          </span>
+      <div className="grid gap-5 sm:grid-cols-2">
+        <div>
+          <label htmlFor="trip-days" className="label">
+            Duration: {days} {days === 1 ? 'day' : 'days'}
+          </label>
           <input
-            type="number"
-            min={500}
-            max={100000}
-            step={100}
-            value={budgetInput}
-            onChange={e => handleBudgetInput(e.target.value)}
-            placeholder="3000"
-            className="w-full bg-slate-800 border border-slate-600 rounded-xl pl-8 pr-20 py-3 text-white placeholder-slate-500 focus:outline-none focus:border-saffron-500 transition-colors [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-            required
+            id="trip-days"
+            type="range"
+            min={1}
+            max={MAX_DAYS}
+            value={days}
+            onChange={event => setDays(Number(event.target.value))}
+            className="w-full accent-[#164E3B]"
           />
-          <span className="absolute right-4 top-1/2 -translate-y-1/2 text-xs text-slate-500">
-            per day
-          </span>
+          <div className="mt-0.5 flex justify-between text-xs text-ink-mute">
+            <span>1</span>
+            <span>{MAX_DAYS} days</span>
+          </div>
         </div>
 
-        {/* Quick preset chips */}
-        <div className="flex flex-wrap gap-2 mt-3">
+        <div>
+          <span className="label" id="travellers-label">Travellers</span>
+          <div className="flex items-center gap-3" role="group" aria-labelledby="travellers-label">
+            <button
+              type="button"
+              aria-label="One fewer traveller"
+              disabled={travellers <= 1}
+              onClick={() => setTravellers(count => count - 1)}
+              className="icon-btn border border-line bg-white hover:bg-forest-50"
+            >
+              <Minus size={16} />
+            </button>
+            <span className="w-6 text-center font-bold" aria-live="polite">{travellers}</span>
+            <button
+              type="button"
+              aria-label="One more traveller"
+              disabled={travellers >= 12}
+              onClick={() => setTravellers(count => count + 1)}
+              className="icon-btn border border-line bg-white hover:bg-forest-50"
+            >
+              <Plus size={16} />
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div>
+        <label htmlFor="trip-budget" className="label">
+          Daily budget per person (₹)
+        </label>
+        <input
+          id="trip-budget"
+          type="number"
+          inputMode="numeric"
+          min={MIN_BUDGET}
+          max={MAX_BUDGET}
+          step={100}
+          value={budgetInput}
+          onChange={event => setBudgetInput(event.target.value)}
+          aria-invalid={!budgetValid}
+          className="input"
+        />
+        <div className="mt-2.5 flex flex-wrap gap-2">
           {BUDGET_PRESETS.map(preset => (
             <button
               key={preset.value}
               type="button"
-              onClick={() => handlePresetClick(preset.value)}
-              className={`px-3 py-1.5 rounded-lg text-xs border transition-all flex flex-col items-center ${
-                budgetPerDay === preset.value
-                  ? 'border-saffron-500 bg-saffron-500/10 text-saffron-400'
-                  : 'border-slate-600 text-slate-400 hover:border-slate-400'
-              }`}
+              aria-pressed={budget === preset.value}
+              onClick={() => setBudgetInput(String(preset.value))}
+              className={`chip ${budget === preset.value ? 'chip-active' : ''}`}
             >
-              <span className="font-semibold">{preset.label}</span>
-              <span className="text-slate-500 text-[10px]">{preset.description}</span>
+              {preset.label} {preset.description}
             </button>
           ))}
         </div>
-
-        {/* Live allocation preview */}
-        {budgetPerDay >= 500 && (
-          <BudgetPreview budget={budgetPerDay} />
-        )}
-
-        {budgetPerDay < 500 && budgetInput !== '' && (
-          <p className="text-red-400 text-xs mt-1.5">
-            Minimum daily budget is ₹500
+        {budgetValid ? (
+          <BudgetPreview budget={budget} />
+        ) : (
+          <p className="mt-1.5 text-sm text-red-700">
+            Enter a budget between ₹500 and ₹1,00,000.
           </p>
         )}
       </div>
-      {/* ── End budget section ─────────────────────────────────────────── */}
 
-      {/* ── Natural Language Preference (unchanged from v1) ────────────── */}
-      <div>
-        <label className="flex items-center gap-2 text-sm font-medium text-slate-400 mb-2">
-          <MessageSquare size={16} className="text-saffron-500" />
-          Describe Your Travel Style
-          <span className="text-slate-600 text-xs font-normal">
-            (AI will understand your preferences)
-          </span>
-        </label>
-
-        <textarea
-          value={preferenceText}
-          onChange={e => setPreferenceText(e.target.value)}
-          placeholder={
-            `Describe what you enjoy...\n` +
-            `e.g. "I love ancient forts and local street food" or ` +
-            `"Peaceful nature spots and cozy cafes"`
-          }
-          rows={3}
-          maxLength={500}
-          className="w-full bg-slate-800 border border-slate-600 rounded-xl px-4 py-3 text-white placeholder-slate-500 focus:outline-none focus:border-saffron-500 transition-colors resize-none"
-          required
-        />
-
-        <div className="flex items-center justify-between mt-1.5">
-          <span
-            className={`text-xs ${
-              charCount < 5 ? 'text-red-400' : 'text-slate-500'
-            }`}
-          >
-            {charCount < 5
-              ? `${5 - charCount} more characters needed`
-              : '✓ AI will encode this with Sentence-BERT'}
-          </span>
-          <span className="text-xs text-slate-600">{charCount}/500</span>
+      <fieldset>
+        <legend className="label">Interests</legend>
+        <div className="flex flex-wrap gap-2">
+          {INTERESTS.map(({ key, label, icon: Icon }) => (
+            <button
+              key={key}
+              type="button"
+              aria-pressed={interests.includes(key)}
+              onClick={() => toggleInterest(key)}
+              className={`chip ${interests.includes(key) ? 'chip-active' : ''}`}
+            >
+              <Icon size={15} /> {label}
+            </button>
+          ))}
         </div>
+      </fieldset>
 
-        {/* Example prompt chips */}
-        <div className="mt-3">
-          <p className="text-xs text-slate-500 mb-2">Try an example:</p>
-          <div className="flex flex-wrap gap-2">
-            {EXAMPLE_PROMPTS.map((prompt, i) => (
-              <button
-                key={i}
-                type="button"
-                onClick={() => setPreferenceText(prompt)}
-                className={`px-3 py-1.5 rounded-lg text-xs border transition-colors text-left ${
-                  preferenceText === prompt
-                    ? 'bg-teal-500/20 border-teal-500 text-teal-400'
-                    : 'border-slate-700 text-slate-400 hover:border-slate-500 hover:text-slate-300'
-                }`}
-              >
-                "{prompt.length > 45 ? prompt.slice(0, 42) + '...' : prompt}"
-              </button>
-            ))}
-          </div>
+      <div>
+        <label htmlFor="trip-preference" className="label">
+          Travel preferences
+        </label>
+        <textarea
+          id="trip-preference"
+          value={preference}
+          onChange={event => setPreference(event.target.value)}
+          rows={3}
+          maxLength={300}
+          placeholder="Describe the trip you want in your own words"
+          className="input resize-none"
+        />
+        <div className="mt-2 flex flex-wrap gap-2">
+          {EXAMPLE_PROMPTS.map(prompt => (
+            <button
+              key={prompt}
+              type="button"
+              onClick={() => setPreference(prompt)}
+              className="rounded-lg bg-forest-50 px-2.5 py-1 text-left text-xs font-medium text-forest-800 hover:bg-forest-100"
+            >
+              {prompt}
+            </button>
+          ))}
         </div>
       </div>
 
-      {/* ── Submit ──────────────────────────────────────────────────────── */}
       <button
         type="submit"
         disabled={loading || !isValid}
-        className="w-full btn-primary py-4 rounded-xl text-lg font-semibold disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+        className="btn-primary w-full py-3.5 text-base"
       >
-        {loading ? (
-          <>
-            <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-white" />
-            Encoding preferences with SBERT...
-          </>
-        ) : (
-          <>✈️ Generate AI Itinerary</>
-        )}
+        <Sparkles size={18} />
+        {loading ? 'Building your itinerary…' : 'Generate itinerary'}
       </button>
-
-      {/* Pipeline explanation */}
-      <div className="bg-slate-800/50 rounded-xl p-3 border border-slate-700">
-        <p className="text-xs text-slate-500 text-center leading-relaxed">
-          Your text →{' '}
-          <span className="text-teal-400">Sentence-BERT</span> → 384-dim vector →{' '}
-          <span className="text-teal-400">FAISS</span> semantic search →{' '}
-          ₹{budgetPerDay.toLocaleString('en-IN')}/day filter →{' '}
-          <span className="text-teal-400">XGBoost</span> ranker →{' '}
-          <span className="text-teal-400">OR-Tools</span> route → Itinerary
+      {!isValid && !loading && (
+        <p className="text-center text-sm text-ink-soft">
+          Add a destination and pick an interest or describe your trip to continue.
         </p>
-      </div>
+      )}
     </form>
   );
 }

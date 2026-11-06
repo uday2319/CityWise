@@ -77,6 +77,15 @@ class ItineraryRequest(BaseModel):
         )
     )
 
+    exclude_places: Optional[List[str]] = Field(
+        None,
+        max_length=300,
+        description=(
+            "Optional attraction names to leave out, used to regenerate a "
+            "different plan. Ignored if too few places would remain."
+        )
+    )
+
     @validator("preference_text")
     def preference_text_not_empty(cls, v):
         if not v or not v.strip():
@@ -189,6 +198,9 @@ class AttractionResponse(BaseModel):
     end_time: Optional[str]
     interest_tags: List[str]
     semantic_score: Optional[float] = None   # SBERT similarity score
+    # True when rating/entrance_fee are defaults, not real data (Geoapify
+    # supplies neither). Clients should not display them as facts.
+    placeholder_metrics: bool = False
 
     class Config:
         from_attributes = True
@@ -202,6 +214,7 @@ class RestaurantResponse(BaseModel):
     area: Optional[str]
     latitude: Optional[float]
     longitude: Optional[float]
+    cost_is_estimate: bool = False    # True when cost_for_two is not real data
 
     class Config:
         from_attributes = True

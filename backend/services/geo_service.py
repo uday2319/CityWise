@@ -9,6 +9,7 @@ Returns dicts with EXACT keys expected by the scheduler:
 
 import os
 import math
+import re
 import httpx
 from typing import Optional
 from geopy.geocoders import Nominatim
@@ -57,6 +58,28 @@ _DURATION_MAP = {
 }
 
 
+# Explore-page interest filters → Geoapify category groups
+INTEREST_CATEGORIES = {
+    "nature":    ["natural", "leisure.park"],
+    "adventure": ["natural.mountain", "natural.protected_area", "natural.forest",
+                  "camping", "entertainment.activity_park"],
+    "history":   ["tourism.sights", "heritage"],
+    "religious": ["religion"],
+    "beaches":   ["beach"],
+    "culture":   ["entertainment.culture", "entertainment.museum"],
+}
+
+# Map features with a name that visitors would not choose to go to,
+# including unnamed features labelled with their postal code.
+_NOT_AN_ATTRACTION = re.compile(
+    r"\bparking\b|\bhostel\b|^local park\b|^colony park$|\b\d{6}\b",
+    re.IGNORECASE,
+)
+
+# Successful geocodes only, so a transient failure is retried next request.
+_geocode_cache: dict[str, tuple[float, float]] = {}
+
+
 # ── Helpers ────────────────────────────────────────────────────────────────
 
 def _is_valid_coord(lat: object, lon: object) -> bool:
@@ -73,11 +96,16 @@ def _is_valid_coord(lat: object, lon: object) -> bool:
 
 
 def _geocode_city(city: str) -> Optional[tuple[float, float]]:
+    cache_key = city.lower().strip()
+    if cache_key in _geocode_cache:
+        return _geocode_cache[cache_key]
     try:
         geo      = Nominatim(user_agent="itinera_geo", timeout=5)
         location = geo.geocode(f"{city}, India")
         if location:
-            return float(location.latitude), float(location.longitude)
+            centre = (float(location.latitude), float(location.longitude))
+            _geocode_cache[cache_key] = centre
+            return centre
     except Exception as exc:
         print(f"  [GeoService] Geocoding failed for '{city}': {exc}")
     return None
@@ -92,11 +120,16 @@ def _map_category(raw_cats: list[str]) -> str:
 
 
 # ── Geoapify fetch ─────────────────────────────────────────────────────────
-def _fetch_raw(city_lat: float, city_lon: float, limit: int) -> list[dict]:
+def _fetch_raw(
+    city_lat: float,
+    city_lon: float,
+    limit: int,
+    categories: Optional[list[str]] = None,
+) -> list[dict]:
     url = "https://api.geoapify.com/v2/places"
 
     params = {
-        "categories": ",".join(ATTRACTION_CATEGORIES),
+        "categories": ",".join(categories or ATTRACTION_CATEGORIES),
         "filter": f"circle:{city_lon},{city_lat},{SEARCH_RADIUS_M}",
         "bias": f"proximity:{city_lon},{city_lat}",
         "limit": limit,
@@ -149,6 +182,9 @@ def _parse(
     if not name or len(name) < 3:
         return None
 
+    if _NOT_AN_ATTRACTION.search(name):
+        return None
+
     category      = _map_category(props.get("categories", []))
     visit_duration = _DURATION_MAP.get(category, 2.0)
 
@@ -172,6 +208,8 @@ def _parse(
         "final_score":          0.5,
         "semantic_score":       0.5,
         "budget_fit_score":     1.0,
+        # rating and entrance_fee above are defaults, not real data.
+        "placeholder_metrics":  True,
     }
 
 
@@ -213,3 +251,90 @@ def get_places(city: str, user_input: str = "") -> list[dict]:
 
     print(f"  [GeoService] Valid unique places: {len(places)}")
     return places
+
+
+def search_places(city: str, interest: Optional[str] = None, limit: int = 60) -> list[dict]:
+    """
+    Places for the Explore page. Unlike get_places() this keeps display
+    fields and reports rating as None, because Geoapify has no ratings.
+    """
+    if not GEOAPIFY_API_KEY:
+        raise EnvironmentError("GEOAPIFY_API_KEY is not set.")
+
+    centre = _geocode_city(city)
+    if centre is None:
+        return []
+    city_lat, city_lon = centre
+
+    categories = INTEREST_CATEGORIES.get(interest or "")
+    # Fetch the full page: names are de-duplicated below, then limited.
+    raw = _fetch_raw(city_lat, city_lon, limit=MAX_PLACES, categories=categories)
+
+    places: list[dict] = []
+    seen: set[str] = set()
+    for feature in raw:
+        parsed = _parse(feature, city_lat, city_lon, city)
+        if parsed is None:
+            continue
+        key = parsed["attraction_name"].lower().strip()
+        if key in seen:
+            continue
+        seen.add(key)
+
+        props = feature.get("properties", {})
+        places.append({
+            "id":          props.get("place_id") or key,
+            "name":        parsed["attraction_name"],
+            "category":    parsed["category"],
+            "city":        city,
+            "latitude":    parsed["latitude"],
+            "longitude":   parsed["longitude"],
+            "address":     props.get("formatted"),
+            "website":     props.get("website"),
+            "opening_hours": props.get("opening_hours"),
+            "visit_duration_hours": parsed["visit_duration_hours"],
+            "rating":      None,
+        })
+    return places[:limit]
+
+
+def get_restaurants(city: str, limit: int = 100) -> list[dict]:
+    """
+    Real restaurants near the city centre, used when the CSV has none.
+    Geoapify has no price or rating data, so cost_for_two and rating are
+    deliberately absent; the caller decides how to treat them.
+    """
+    if not GEOAPIFY_API_KEY:
+        raise EnvironmentError("GEOAPIFY_API_KEY is not set.")
+
+    centre = _geocode_city(city)
+    if centre is None:
+        return []
+    city_lat, city_lon = centre
+
+    raw = _fetch_raw(city_lat, city_lon, limit=limit, categories=["catering.restaurant"])
+
+    restaurants: list[dict] = []
+    seen: set[str] = set()
+    for feature in raw:
+        props = feature.get("properties", {})
+        coords = feature.get("geometry", {}).get("coordinates", [])
+        name = (props.get("name") or "").strip()
+        if len(name) < 3 or len(coords) < 2:
+            continue
+        lon, lat = coords[0], coords[1]
+        if not _is_valid_coord(lat, lon) or name.lower() in seen:
+            continue
+        seen.add(name.lower())
+
+        cuisine = (props.get("catering") or {}).get("cuisine")
+        restaurants.append({
+            "restaurant_name": name,
+            "city":      city,
+            "area":      props.get("suburb") or props.get("district") or "",
+            "cuisine":   cuisine.replace("_", " ").replace(";", ", ").title() if cuisine else None,
+            "latitude":  float(lat),
+            "longitude": float(lon),
+        })
+    print(f"  [GeoService] Restaurants for '{city}': {len(restaurants)}")
+    return restaurants

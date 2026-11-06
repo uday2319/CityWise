@@ -1,245 +1,135 @@
-import React from 'react';
-import {
-  IndianRupee,
-  TrendingUp,
-  Utensils,
-  MapPin,
-  Navigation,
-  CheckCircle,
-  AlertCircle,
-} from 'lucide-react';
+import { CheckCircle, AlertCircle, MapPin, Navigation, TrendingUp, Utensils } from 'lucide-react';
 import type { ItineraryResponse } from '../types';
+import { inr, mealCost } from '../lib/format';
 
-interface Props {
+export default function BudgetPanel({
+  itinerary,
+  travellers,
+}: {
   itinerary: ItineraryResponse;
-}
-
-export default function BudgetPanel({ itinerary }: Props) {
+  travellers: number;
+}) {
   const alloc = itinerary.budget_allocation;
   const totalActual = itinerary.total_budget_actual;
-  const totalLimit  = itinerary.total_budget_limit;
-  const overBudget  = totalActual > totalLimit;
-  const utilPct     = totalLimit > 0
-    ? Math.round((totalActual / totalLimit) * 100)
-    : 0;
+  const totalLimit = itinerary.total_budget_limit;
+  const overBudget = totalActual > totalLimit;
+  const utilPct = totalLimit > 0 ? Math.round((totalActual / totalLimit) * 100) : 0;
 
-  // Compute breakdown from days
-  const attrCosts = itinerary.days.reduce(
-    (sum, day) =>
-      sum + day.attractions.reduce((s, a) => s + (a.entrance_fee || 0), 0),
-    0
-  );
-  const foodCosts = itinerary.days.reduce((sum, day) => {
-    const l = (day.lunch?.cost_for_two || 400) / 2;
-    const d = (day.dinner?.cost_for_two || 600) / 2;
-    return sum + l + d;
-  }, 0);
+  const stops = itinerary.days.flatMap(day => day.attractions);
+  const meals = itinerary.days.flatMap(day => [day.lunch, day.dinner]);
+
+  const attrCosts = stops.reduce((sum, a) => sum + (a.entrance_fee || 0), 0);
+  const foodCosts = meals.reduce((sum, meal) => sum + (mealCost(meal) ?? 0), 0);
   const transportCosts = alloc.transport_allocation_inr * itinerary.duration_days;
 
+  const feesUnknown = stops.some(a => a.placeholder_metrics);
+  const foodEstimated = meals.some(meal => meal?.cost_is_estimate);
+
   const lineItems = [
-    {
-      label: 'Attractions',
-      value: attrCosts,
-      icon: <MapPin size={14} />,
-      color: 'text-saffron-500',
-      bar: 'bg-saffron-500',
-    },
-    {
-      label: 'Food & Dining',
-      value: foodCosts,
-      icon: <Utensils size={14} />,
-      color: 'text-teal-500',
-      bar: 'bg-teal-500',
-    },
-    {
-      label: 'Transport',
-      value: transportCosts,
-      icon: <Navigation size={14} />,
-      color: 'text-purple-400',
-      bar: 'bg-purple-400',
-    },
+    { label: 'Attractions', note: feesUnknown ? 'fees not listed' : '', value: attrCosts, icon: <MapPin size={15} />, bar: 'bg-forest-800' },
+    { label: 'Food and dining', note: foodEstimated ? 'estimated' : '', value: foodCosts, icon: <Utensils size={15} />, bar: 'bg-ember-500' },
+    { label: 'Local transport', note: 'allowance', value: transportCosts, icon: <Navigation size={15} />, bar: 'bg-teal-500' },
   ];
 
   return (
-    <div className="card rounded-2xl p-5 space-y-5">
-
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <h3 className="text-white font-semibold flex items-center gap-2">
-          <TrendingUp size={16} className="text-saffron-500" />
-          Budget Summary
-        </h3>
-        <div className="flex items-center gap-1.5">
-          {overBudget ? (
-            <AlertCircle size={14} className="text-red-400" />
-          ) : (
-            <CheckCircle size={14} className="text-green-400" />
-          )}
-          <span
-            className={`text-xs font-medium ${
-              overBudget ? 'text-red-400' : 'text-green-400'
-            }`}
-          >
-            {overBudget ? 'Over budget' : 'Within budget'}
-          </span>
-        </div>
+    <section aria-label="Budget breakdown" className="card p-5 sm:p-6">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h2 className="flex items-center gap-2 text-lg font-bold">
+          <TrendingUp size={18} className="text-forest-500" />
+          Budget breakdown
+        </h2>
+        <span className={`flex items-center gap-1.5 text-sm font-semibold ${overBudget ? 'text-red-700' : 'text-forest-700'}`}>
+          {overBudget ? <AlertCircle size={15} /> : <CheckCircle size={15} />}
+          {overBudget ? 'Over budget' : 'Within budget'}
+        </span>
       </div>
+      <p className="mt-1 text-sm text-ink-soft">
+        Per person for the whole trip · {itinerary.budget_label}. Accommodation is not included.
+      </p>
 
-      {/* Budget tier label */}
-      <div className="bg-slate-800 rounded-xl px-4 py-2 flex items-center justify-between">
-        <span className="text-slate-400 text-sm">Your budget</span>
-        <div className="text-right">
-          <span className="text-white font-bold text-lg">
-            ₹{itinerary.budget_per_day_inr.toLocaleString('en-IN')}
-          </span>
-          <span className="text-slate-400 text-xs ml-1">/day</span>
-          <div className="text-xs text-saffron-400 mt-0.5">
-            {itinerary.budget_label}
+      <div className="mt-5 grid gap-6 lg:grid-cols-2">
+        <div>
+          <div className="grid grid-cols-3 gap-3">
+            {[
+              { label: 'Estimated', value: inr(totalActual) },
+              { label: 'Daily average', value: inr(totalActual / itinerary.duration_days) },
+              { label: 'Budget used', value: `${utilPct}%` },
+            ].map(stat => (
+              <div key={stat.label} className="rounded-xl bg-canvas p-3 text-center">
+                <div className="text-lg font-extrabold">{stat.value}</div>
+                <div className="text-xs text-ink-soft">{stat.label}</div>
+              </div>
+            ))}
           </div>
-        </div>
-      </div>
 
-      {/* Budget allocation breakdown (from schema) */}
-      <div className="bg-slate-800/50 border border-slate-700 rounded-xl p-3 space-y-1.5">
-        <div className="text-xs text-slate-500 font-medium mb-2">
-          Allocation per day
-        </div>
-        <div className="grid grid-cols-2 gap-x-4 gap-y-1">
-          <div className="flex justify-between text-xs">
-            <span className="text-slate-400">Max attraction fee</span>
-            <span className="text-white">
-              ≤ ₹{alloc.max_entrance_fee_inr.toLocaleString('en-IN')}
-            </span>
-          </div>
-          <div className="flex justify-between text-xs">
-            <span className="text-slate-400">Max lunch (2 pax)</span>
-            <span className="text-white">
-              ≤ ₹{alloc.max_lunch_cost_for_two_inr.toLocaleString('en-IN')}
-            </span>
-          </div>
-          <div className="flex justify-between text-xs">
-            <span className="text-slate-400">Max dinner (2 pax)</span>
-            <span className="text-white">
-              ≤ ₹{alloc.max_dinner_cost_for_two_inr.toLocaleString('en-IN')}
-            </span>
-          </div>
-          <div className="flex justify-between text-xs">
-            <span className="text-slate-400">Transport buffer</span>
-            <span className="text-white">
-              ₹{alloc.transport_allocation_inr.toLocaleString('en-IN')}
-            </span>
-          </div>
-        </div>
-      </div>
-
-      {/* Top stats */}
-      <div className="grid grid-cols-3 gap-3">
-        <div className="bg-slate-800 rounded-xl p-3 text-center">
-          <div className="text-xl font-bold text-white">
-            ₹{Math.round(totalActual).toLocaleString('en-IN')}
-          </div>
-          <div className="text-xs text-slate-400 mt-0.5">Total Actual</div>
-        </div>
-        <div className="bg-slate-800 rounded-xl p-3 text-center">
-          <div className="text-xl font-bold text-white">
-            ₹{Math.round(totalActual / itinerary.duration_days).toLocaleString('en-IN')}
-          </div>
-          <div className="text-xs text-slate-400 mt-0.5">Daily Average</div>
-        </div>
-        <div className="bg-slate-800 rounded-xl p-3 text-center">
           <div
-            className={`text-xl font-bold ${
-              overBudget ? 'text-red-400' : 'text-green-400'
-            }`}
+            className="mt-4 flex h-2.5 overflow-hidden rounded-full bg-forest-50"
+            role="img"
+            aria-label="Share of spending by category"
           >
-            {utilPct}%
-          </div>
-          <div className="text-xs text-slate-400 mt-0.5">Used</div>
-        </div>
-      </div>
-
-      {/* Overall utilization bar */}
-      <div>
-        <div className="flex justify-between text-xs text-slate-500 mb-1">
-          <span>₹0</span>
-          <span>Budget: ₹{Math.round(totalLimit).toLocaleString('en-IN')}</span>
-        </div>
-        <div className="h-2 bg-slate-700 rounded-full overflow-hidden">
-          <div
-            className={`h-full rounded-full transition-all ${
-              overBudget ? 'bg-red-500' : 'bg-saffron-500'
-            }`}
-            style={{ width: `${Math.min(utilPct, 100)}%` }}
-          />
-        </div>
-      </div>
-
-      {/* Category breakdown */}
-      <div>
-        <div className="h-2 rounded-full flex overflow-hidden mb-3">
-          {lineItems.map((item, i) => (
-            <div
-              key={i}
-              className={`${item.bar} transition-all`}
-              style={{
-                width: `${
-                  totalActual > 0 ? (item.value / totalActual) * 100 : 33
-                }%`,
-              }}
-            />
-          ))}
-        </div>
-        <div className="space-y-2">
-          {lineItems.map((item, i) => (
-            <div key={i} className="flex items-center justify-between">
+            {lineItems.map(item => (
               <div
-                className={`flex items-center gap-2 text-sm ${item.color}`}
-              >
-                {item.icon}
-                <span className="text-slate-300">{item.label}</span>
-              </div>
-              <span className="text-sm text-white">
-                ₹{Math.round(item.value).toLocaleString('en-IN')}
-              </span>
-            </div>
-          ))}
+                key={item.label}
+                className={item.bar}
+                style={{ width: `${totalActual > 0 ? (item.value / totalActual) * 100 : 0}%` }}
+              />
+            ))}
+          </div>
+
+          <ul className="mt-3 space-y-2">
+            {lineItems.map(item => (
+              <li key={item.label} className="flex items-center justify-between text-sm">
+                <span className="flex items-center gap-2 text-ink-soft">
+                  {item.icon} {item.label}
+                  {item.note && <span className="text-xs text-ink-mute">({item.note})</span>}
+                </span>
+                <span className="font-semibold">
+                  {item.value === 0 && item.note === 'fees not listed' ? 'Not listed' : inr(item.value)}
+                </span>
+              </li>
+            ))}
+          </ul>
+
+          {travellers > 1 && (
+            <p className="mt-3 border-t border-line pt-3 text-sm font-semibold">
+              {travellers} travellers: {inr(totalActual * travellers)} in total
+            </p>
+          )}
+        </div>
+
+        <div>
+          <h3 className="mb-3 text-sm font-bold">Each day against your limit</h3>
+          <ul className="max-h-56 space-y-3 overflow-y-auto pr-1">
+            {itinerary.days.map(day => {
+              const over = day.day_budget_actual > day.day_budget_limit;
+              return (
+                <li key={day.day}>
+                  <div className="mb-1 flex justify-between text-xs">
+                    <span className="font-semibold text-ink-soft">Day {day.day}</span>
+                    <span className="text-ink-soft">
+                      {inr(day.day_budget_actual)} of {inr(day.day_budget_limit)}
+                    </span>
+                  </div>
+                  <div className="h-1.5 overflow-hidden rounded-full bg-forest-50">
+                    <div
+                      className={`h-full rounded-full ${over ? 'bg-red-600' : 'bg-forest-800'}`}
+                      style={{ width: `${Math.min(day.budget_utilization_pct, 100)}%` }}
+                    />
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
         </div>
       </div>
 
-      {/* Per-day breakdown with utilization bars */}
-      <div className="pt-3 border-t border-slate-700">
-        <div className="text-xs text-slate-400 mb-3">
-          Per Day — Actual vs Limit
-        </div>
-        <div className="space-y-2.5">
-          {itinerary.days.map(day => {
-            const pct = Math.min(day.budget_utilization_pct, 100);
-            const over = day.day_budget_actual > day.day_budget_limit;
-            return (
-              <div key={day.day}>
-                <div className="flex items-center justify-between mb-0.5">
-                  <span className="text-xs text-slate-500">Day {day.day}</span>
-                  <span className="text-xs text-slate-300">
-                    ₹{Math.round(day.day_budget_actual).toLocaleString('en-IN')}
-                    {' '}
-                    <span className="text-slate-500">
-                      / ₹{Math.round(day.day_budget_limit).toLocaleString('en-IN')}
-                    </span>
-                  </span>
-                </div>
-                <div className="h-1.5 bg-slate-700 rounded-full overflow-hidden">
-                  <div
-                    className={`h-full rounded-full ${
-                      over ? 'bg-red-500' : 'bg-saffron-500'
-                    }`}
-                    style={{ width: `${pct}%` }}
-                  />
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      </div>
-    </div>
+      {(feesUnknown || foodEstimated) && (
+        <p className="mt-4 rounded-xl bg-ember-50 px-3.5 py-2.5 text-sm text-ink">
+          {feesUnknown && 'Entrance fees are not available for these places, so they are not counted. '}
+          {foodEstimated && 'Meal prices are CityWise estimates, not restaurant prices. '}
+          Allow extra for these.
+        </p>
+      )}
+    </section>
   );
 }
